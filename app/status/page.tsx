@@ -18,7 +18,7 @@ export default function StatusPage() {
   const counts = React.useMemo(() => {
     const out: Record<AreaHealth, number> = { crit: 0, warn: 0, ok: 0, idle: 0 }
     if (!hydrated) return out
-    for (const a of state.areas) out[areaHealth(state, a.id)] += 1
+    for (const a of state.areas.filter((a) => a.active !== false)) out[areaHealth(state, a.id)] += 1
     return out
   }, [state, hydrated])
 

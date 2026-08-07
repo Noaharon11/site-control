@@ -6,16 +6,19 @@ import { dayOffset, nowTime, today } from "./dates"
 import type {
   ActivityKind,
   ActivityLog,
+  Area,
   AreaVisit,
   Blocker,
   Decision,
   Defect,
   Observation,
+  Person,
   Photo,
   ProjectState,
   Task,
   TaskStatus,
   Tour,
+  User,
 } from "./types"
 
 const STORAGE_KEY = "rakafot.pm.v1"
@@ -27,17 +30,36 @@ type Action =
   | { type: "reset" }
   | { type: "toggleOffline"; value?: boolean }
   | { type: "sync" }
+  /* ---- project ---- */
+  | { type: "updateProject"; patch: Partial<ProjectState["project"]> }
+  /* ---- people ---- */
+  | { type: "addPerson"; person: Person }
+  | { type: "updatePerson"; id: string; patch: Partial<Person> }
+  | { type: "archivePerson"; id: string }
+  /* ---- areas ---- */
+  | { type: "addArea"; area: Area }
+  | { type: "updateArea"; id: string; patch: Partial<Area> }
+  | { type: "archiveArea"; id: string }
+  | { type: "setTourRoute"; areaIds: string[] }
+  /* ---- users ---- */
+  | { type: "addUser"; user: User }
+  | { type: "updateUser"; id: string; patch: Partial<User> }
+  | { type: "archiveUser"; id: string }
+  /* ---- tours ---- */
   | { type: "startTour" }
   | { type: "endTour"; priorities: string[] }
   | { type: "saveVisit"; areaId: string; patch: Partial<AreaVisit> }
   | { type: "skipVisit"; areaId: string }
+  /* ---- tasks ---- */
   | { type: "addTask"; task: Task }
   | { type: "updateTask"; id: string; patch: Partial<Task>; note?: string }
+  /* ---- field records ---- */
   | { type: "addObservation"; observation: Observation }
   | { type: "addBlocker"; blocker: Blocker }
   | { type: "addDefect"; defect: Defect }
   | { type: "addDecision"; decision: Decision }
   | { type: "addPhoto"; photo: Photo }
+  /* ---- targets / log ---- */
   | { type: "setTargets"; targets: { text: string; taskId?: string | null }[] }
   | { type: "toggleTarget"; id: string }
   | { type: "log"; kind: ActivityKind; text: string; areaId?: string | null; refId?: string | null }
@@ -101,6 +123,69 @@ function reducer(state: ProjectState, action: Action): ProjectState {
       }
     }
 
+    /* ---------------------------------------------------------------- project */
+    case "updateProject":
+      return { ...state, project: { ...state.project, ...action.patch } }
+
+    /* ---------------------------------------------------------------- people */
+    case "addPerson":
+      return { ...state, people: [...state.people, action.person] }
+
+    case "updatePerson":
+      return {
+        ...state,
+        people: state.people.map((p) => (p.id === action.id ? { ...p, ...action.patch } : p)),
+      }
+
+    case "archivePerson":
+      return {
+        ...state,
+        people: state.people.map((p) => (p.id === action.id ? { ...p, active: false } : p)),
+      }
+
+    /* ---------------------------------------------------------------- areas */
+    case "addArea": {
+      const nextOrder = Math.max(0, ...state.areas.map((a) => a.routeOrder)) + 1
+      const newArea = { ...action.area, routeOrder: nextOrder }
+      return {
+        ...state,
+        areas: [...state.areas, newArea],
+        tourRoute: [...state.tourRoute, newArea.id],
+      }
+    }
+
+    case "updateArea":
+      return {
+        ...state,
+        areas: state.areas.map((a) => (a.id === action.id ? { ...a, ...action.patch } : a)),
+      }
+
+    case "archiveArea":
+      return {
+        ...state,
+        areas: state.areas.map((a) => (a.id === action.id ? { ...a, active: false } : a)),
+        tourRoute: state.tourRoute.filter((id) => id !== action.id),
+      }
+
+    case "setTourRoute":
+      return { ...state, tourRoute: action.areaIds }
+
+    /* ---------------------------------------------------------------- users */
+    case "addUser":
+      return { ...state, users: [...(state.users ?? []), action.user] }
+
+    case "updateUser":
+      return {
+        ...state,
+        users: (state.users ?? []).map((u) => (u.id === action.id ? { ...u, ...action.patch } : u)),
+      }
+
+    case "archiveUser":
+      return {
+        ...state,
+        users: (state.users ?? []).map((u) => (u.id === action.id ? { ...u, active: false } : u)),
+      }
+
     case "sync": {
       const clear = <T extends { pending?: boolean }>(arr: T[]) =>
         arr.map((x) => (x.pending ? { ...x, pending: false } : x))
@@ -119,15 +204,22 @@ function reducer(state: ProjectState, action: Action): ProjectState {
     }
 
     case "startTour": {
-      const tours = withTour(state, (t) => ({
-        ...t,
-        status: "active",
-        startedAt: t.startedAt ?? nowTime(),
-        visits:
-          Object.keys(t.visits).length > 0
-            ? t.visits
-            : Object.fromEntries(t.routeAreaIds.map((id) => [id, emptyVisit(id)])),
-      }))
+      // use the configured tour route (filtered to active areas) for today's tour
+      const activeAreaIds = new Set(state.areas.filter((a) => a.active !== false).map((a) => a.id))
+      const configuredRoute = (state.tourRoute ?? []).filter((id) => activeAreaIds.has(id))
+      const tours = withTour(state, (t) => {
+        const route = t.routeAreaIds.length > 0 ? t.routeAreaIds : configuredRoute
+        return {
+          ...t,
+          status: "active",
+          startedAt: t.startedAt ?? nowTime(),
+          routeAreaIds: route,
+          visits:
+            Object.keys(t.visits).length > 0
+              ? t.visits
+              : Object.fromEntries(route.map((id) => [id, emptyVisit(id)])),
+        }
+      })
       return { ...state, tours, activity: log(state, "tour", "סיור בוקר התחיל") }
     }
 
@@ -374,7 +466,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (raw) {
         const parsed = JSON.parse(raw) as { savedFor: string; state: ProjectState }
         // a stale demo day would show yesterday's tour as today's – reseed instead
-        if (parsed.savedFor === today()) dispatch({ type: "hydrate", state: parsed.state })
+        if (parsed.savedFor === today()) {
+          const loaded = parsed.state
+          // backwards-compat: fill in fields added in later versions
+          const seed = createSeedState()
+          const compatible: ProjectState = {
+            ...loaded,
+            project: {
+              ...seed.project,
+              ...loaded.project,
+            },
+            tourRoute: loaded.tourRoute ?? seed.tourRoute,
+            users: loaded.users ?? seed.users,
+            areas: loaded.areas.map((a) => ({ active: true, ...a })),
+            people: loaded.people.map((p) => ({ active: true, ...p })),
+          }
+          dispatch({ type: "hydrate", state: compatible })
+        }
       }
     } catch {
       /* ignore corrupt demo data */

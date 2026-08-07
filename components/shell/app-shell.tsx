@@ -11,6 +11,7 @@ import {
   LayoutGrid,
   Building2,
   FileText,
+  Settings2,
   Sun,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -33,6 +34,7 @@ const NAV: NavItem[] = [
   { href: "/weekly", label: "תכנון שבועי", icon: CalendarRange },
   { href: "/reports", label: "דוחות", icon: FileText },
   { href: "/history", label: "היסטוריה", icon: History, mobile: true },
+  { href: "/admin", label: "ניהול מערכת", icon: Settings2, mobile: true },
 ]
 
 function isActive(pathname: string, href: string) {
@@ -60,8 +62,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <LayoutGrid className="size-5" />
           </div>
           <div className="min-w-0">
-            <p className="truncate text-sm font-bold">פרויקט הרקפות</p>
-            <p className="truncate text-xs text-sidebar-foreground/60">45 דירות • 7 קומות</p>
+            <p className="truncate text-sm font-bold">{hydrated ? state.project.name : "פרויקט"}</p>
+            <p className="truncate text-xs text-sidebar-foreground/60">
+              {hydrated ? `${state.project.apartments} דירות • ${state.project.floors} קומות` : ""}
+            </p>
           </div>
         </div>
 

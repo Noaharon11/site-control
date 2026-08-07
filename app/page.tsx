@@ -74,7 +74,7 @@ export default function TodayPage() {
                 ? `${stats.scanned} אזורים נסרקו • ${stats.tasks} משימות חדשות • ${stats.blockers} חסמים • ${stats.decisions} סיכומים`
                 : tour?.status === "active"
                   ? `${stats.scanned} מתוך ${stats.total} אזורים נסרקו`
-                  : `${state.areas.length} אזורים במסלול • כשעה הליכה`}
+                  : `${state.areas.filter((a) => a.active !== false).length} אזורים במסלול • כשעה הליכה`}
             </p>
           </div>
           <Button

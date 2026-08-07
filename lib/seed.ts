@@ -12,6 +12,7 @@ import type {
   Task,
   Tour,
   ActivityLog,
+  User,
 } from "./types"
 
 /* -------------------------------------------------------------- areas ---- */
@@ -28,11 +29,12 @@ function buildAreas(): Area[] {
       level: -n,
       wing: null,
       routeOrder: order++,
+      active: true,
     })
   }
   areas.push(
-    { id: "g-e", name: "קומת קרקע - מזרח", zone: "ground", level: 0, wing: "east", routeOrder: order++ },
-    { id: "g-w", name: "קומת קרקע - מערב", zone: "ground", level: 0, wing: "west", routeOrder: order++ },
+    { id: "g-e", name: "קומת קרקע - מזרח", zone: "ground", level: 0, wing: "east", routeOrder: order++, active: true },
+    { id: "g-w", name: "קומת קרקע - מערב", zone: "ground", level: 0, wing: "west", routeOrder: order++, active: true },
   )
   // route: up the east wing, roof, then down the west wing
   for (let f = 1; f <= 7; f++) {
@@ -43,9 +45,10 @@ function buildAreas(): Area[] {
       level: f,
       wing: "east",
       routeOrder: order++,
+      active: true,
     })
   }
-  areas.push({ id: "roof", name: "גג", zone: "roof", level: 8, wing: null, routeOrder: order++ })
+  areas.push({ id: "roof", name: "גג", zone: "roof", level: 8, wing: null, routeOrder: order++, active: true })
   for (let f = 7; f >= 1; f--) {
     areas.push({
       id: `f${f}-w`,
@@ -54,11 +57,12 @@ function buildAreas(): Area[] {
       level: f,
       wing: "west",
       routeOrder: order++,
+      active: true,
     })
   }
   areas.push(
-    { id: "facade", name: "חזיתות", zone: "facade", level: 9, wing: null, routeOrder: order++ },
-    { id: "ext", name: "פיתוח חוץ", zone: "external", level: 9, wing: null, routeOrder: order++ },
+    { id: "facade", name: "חזיתות", zone: "facade", level: 9, wing: null, routeOrder: order++, active: true },
+    { id: "ext", name: "פיתוח חוץ", zone: "external", level: 9, wing: null, routeOrder: order++, active: true },
   )
   return areas
 }
@@ -66,10 +70,10 @@ function buildAreas(): Area[] {
 /* ------------------------------------------------------------- people ---- */
 
 const people: Person[] = [
-  { id: "me", name: "אני", group: "me", role: "מנהל פרויקט" },
-  { id: "p-yossi", name: "יוסי", group: "team", role: "מנהל עבודה", phone: "052-4410021" },
-  { id: "p-ahmad", name: "אחמד", group: "team", role: "עובד כללי", phone: "054-8820117" },
-  { id: "p-david", name: "דוד", group: "team", role: "עובד כללי", phone: "050-7719043" },
+  { id: "me", name: "אני", group: "me", role: "מנהל פרויקט", active: true },
+  { id: "p-yossi", name: "יוסי", group: "team", role: "מנהל עבודה", phone: "052-4410021", active: true },
+  { id: "p-ahmad", name: "אחמד", group: "team", role: "עובד כללי", phone: "054-8820117", active: true },
+  { id: "p-david", name: "דוד", group: "team", role: "עובד כללי", phone: "050-7719043", active: true },
   {
     id: "c-cohen",
     name: "א. כהן ריצוף",
@@ -77,6 +81,7 @@ const people: Person[] = [
     role: "קבלן ריצוף",
     trade: "ריצוף",
     phone: "052-3390188",
+    active: true,
   },
   {
     id: "c-elec",
@@ -85,6 +90,7 @@ const people: Person[] = [
     role: "קבלן חשמל",
     trade: "חשמל",
     phone: "053-7742290",
+    active: true,
   },
   {
     id: "c-alum",
@@ -93,6 +99,7 @@ const people: Person[] = [
     role: "קבלן אלומיניום",
     trade: "אלומיניום",
     phone: "054-6612380",
+    active: true,
   },
   {
     id: "c-plumb",
@@ -101,6 +108,7 @@ const people: Person[] = [
     role: "קבלן אינסטלציה",
     trade: "אינסטלציה",
     phone: "052-9903471",
+    active: true,
   },
   {
     id: "c-paint",
@@ -109,6 +117,7 @@ const people: Person[] = [
     role: "קבלן צבע",
     trade: "צבע",
     phone: "058-4471109",
+    active: true,
   },
   {
     id: "c-gypsum",
@@ -117,6 +126,7 @@ const people: Person[] = [
     role: "קבלן גבס",
     trade: "גבס",
     phone: "050-3318827",
+    active: true,
   },
   {
     id: "c-doors",
@@ -125,7 +135,15 @@ const people: Person[] = [
     role: "ספק דלתות ומשקופים",
     trade: "נגרות",
     phone: "053-2214498",
+    active: true,
   },
+]
+
+/* -------------------------------------------------------------- users ---- */
+
+const users: User[] = [
+  { id: "u-1", name: "ישראל ישראלי", email: "israel@example.com", phone: "050-1234567", role: "מנהל פרויקט", active: true },
+  { id: "u-2", name: "רחל כהן", email: "rachel@example.com", phone: "052-9876543", role: "מהנדס ביצוע", active: true },
 ]
 
 /* ------------------------------------------------------------- photos ---- */
@@ -1069,16 +1087,26 @@ const activity: ActivityLog[] = [
 
 export function createSeedState(): ProjectState {
   const areas = buildAreas()
+  const tourRoute = areas.map((a) => a.id)
   return {
     project: {
+      id: "proj-1",
       name: "פרויקט הרקפות",
+      description: "פרויקט בנייה למגורים – 45 יחידות דיור בשבע קומות",
+      address: "רחוב הרקפות 12, תל אביב",
+      companyName: "חברת בניה לדוגמה בע\"מ",
+      projectManagerId: "u-1",
       apartments: 45,
       basements: 3,
       floors: 7,
       startedAt: dayOffset(-420),
+      expectedCompletionDate: dayOffset(180),
+      status: "active",
     },
     areas,
+    tourRoute,
     people,
+    users,
     tasks,
     observations,
     blockers,

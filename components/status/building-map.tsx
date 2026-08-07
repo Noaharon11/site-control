@@ -36,7 +36,7 @@ export function BuildingMap({ onSelect }: { onSelect: (areaId: string) => void }
 
   const cells = React.useMemo<Record<string, CellData>>(() => {
     const out: Record<string, CellData> = {}
-    for (const area of state.areas) {
+    for (const area of state.areas.filter((a) => a.active !== false)) {
       const s = areaStats(state, area.id)
       out[area.id] = {
         area,
@@ -53,7 +53,7 @@ export function BuildingMap({ onSelect }: { onSelect: (areaId: string) => void }
 
   // group areas into physical levels, highest first
   const levels = React.useMemo(() => {
-    const inside = state.areas.filter((a) => a.zone !== "facade" && a.zone !== "external")
+    const inside = state.areas.filter((a) => a.zone !== "facade" && a.zone !== "external" && a.active !== false)
     const byLevel = new Map<number, Area[]>()
     for (const a of inside) {
       const list = byLevel.get(a.level) ?? []
@@ -70,7 +70,7 @@ export function BuildingMap({ onSelect }: { onSelect: (areaId: string) => void }
   }, [state.areas])
 
   const outside = React.useMemo(
-    () => state.areas.filter((a) => a.zone === "facade" || a.zone === "external"),
+    () => state.areas.filter((a) => (a.zone === "facade" || a.zone === "external") && a.active !== false),
     [state.areas],
   )
 

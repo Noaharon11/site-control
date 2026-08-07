@@ -80,7 +80,7 @@ export function AreaCapture({
   const tour = state.tours.find((t) => t.date === today())
   const visit: AreaVisit | undefined = tour?.visits[area.id]
 
-  const contractors = state.people.filter((p) => p.group === "contractor")
+  const contractors = state.people.filter((p) => p.group === "contractor" && p.active !== false)
   const carriedTasks = openTasksInArea(state, area.id)
   const carriedBlockers = openBlockers(state).filter((b) => b.areaId === area.id)
 
@@ -759,7 +759,7 @@ function DefectForm({ areaId, onDone }: { areaId: string; onDone: () => void }) 
   const [title, setTitle] = React.useState("")
   const [severity, setSeverity] = React.useState<"critical" | "major" | "minor">("major")
   const [assigneeId, setAssigneeId] = React.useState<string>("")
-  const contractors = state.people.filter((p) => p.group === "contractor")
+  const contractors = state.people.filter((p) => p.group === "contractor" && p.active !== false)
 
   function save() {
     if (!title.trim()) return
@@ -910,7 +910,7 @@ function PhotoForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
 function DealForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
   const { state, dispatch, uid } = useStore()
   const tour = state.tours.find((t) => t.date === today())
-  const contractors = state.people.filter((p) => p.group === "contractor")
+  const contractors = state.people.filter((p) => p.group === "contractor" && p.active !== false)
   const [contractorId, setContractorId] = React.useState(contractors[0]?.id ?? "")
   const [mine, setMine] = React.useState("")
   const [theirs, setTheirs] = React.useState("")

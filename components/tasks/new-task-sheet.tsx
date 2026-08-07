@@ -151,7 +151,7 @@ export function NewTaskSheet({
               {(["me", "team", "contractor"] as const).map((g) => (
                 <SelectGroup key={g}>
                   {state.people
-                    .filter((p) => p.group === g)
+                    .filter((p) => p.group === g && p.active !== false)
                     .map((p) => (
                       <SelectItem key={p.id} value={p.id}>
                         {p.id === "me" ? "אני" : `${p.name} — ${GROUP_LABEL[g]}`}
@@ -172,7 +172,7 @@ export function NewTaskSheet({
             <SelectContent className="max-h-72">
               <SelectGroup>
                 <SelectItem value="none">ללא אזור</SelectItem>
-                {state.areas.map((a) => (
+                {state.areas.filter((a) => a.active !== false).map((a) => (
                   <SelectItem key={a.id} value={a.id}>
                     {a.name}
                   </SelectItem>

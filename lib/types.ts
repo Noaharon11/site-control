@@ -18,6 +18,10 @@ export interface Area {
   wing: Wing
   /** order along the manager's standard walking route */
   routeOrder: number
+  /** parent area id for hierarchical display */
+  parentId?: string | null
+  /** false = archived/inactive */
+  active: boolean
 }
 
 export type PersonGroup = "me" | "team" | "contractor"
@@ -29,6 +33,22 @@ export interface Person {
   role: string
   trade?: string
   phone?: string
+  email?: string
+  notes?: string
+  /** false = archived/inactive */
+  active: boolean
+}
+
+export type UserRole = "מנהל פרויקט" | "מנהל עבודה" | "מהנדס ביצוע" | "עובד" | "צפייה בלבד"
+
+export interface User {
+  id: string
+  name: string
+  email?: string
+  phone?: string
+  role: UserRole
+  /** false = deactivated */
+  active: boolean
 }
 
 export type TaskStatus = "new" | "open" | "in_progress" | "waiting" | "blocked" | "done"
@@ -211,14 +231,24 @@ export interface DayTarget {
 
 export interface ProjectState {
   project: {
+    id: string
     name: string
+    description?: string
+    address?: string
+    companyName?: string
+    projectManagerId?: string
     apartments: number
     basements: number
     floors: number
     startedAt: ISODate
+    expectedCompletionDate?: ISODate
+    status: "planning" | "active" | "finishing" | "completed" | "on_hold"
   }
   areas: Area[]
+  /** configured tour route: ordered list of areaIds to visit */
+  tourRoute: string[]
   people: Person[]
+  users: User[]
   tasks: Task[]
   observations: Observation[]
   blockers: Blocker[]
