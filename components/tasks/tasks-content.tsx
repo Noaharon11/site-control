@@ -208,16 +208,23 @@ export function TasksContent() {
                 <Inbox />
               </EmptyMedia>
               <EmptyTitle>
-                {query ? "לא נמצאו משימות" : `אין משימות ב"${activeLens.label}"`}
+                {query ? "לא נמצאו משימות" : state.tasks.length === 0 ? "אין משימות עדיין" : `אין משימות ב"${activeLens.label}"`}
               </EmptyTitle>
               <EmptyDescription>
                 {query
                   ? "נסה מונח אחר, או בדוק בעדשה אחרת."
-                  : lens === "mine"
+                  : state.tasks.length === 0
+                    ? "אפשר להתחיל ממשימה ראשונה לפרויקט."
+                    : lens === "mine"
                     ? "הרשימה שלך ריקה. זה הזמן לצאת לסיור."
                     : "אין כאן כלום כרגע."}
               </EmptyDescription>
             </EmptyHeader>
+            {!query && state.tasks.length === 0 && (
+              <Button size="sm" onClick={() => setNewOpen(true)}>
+                + צור משימה
+              </Button>
+            )}
           </Empty>
         ) : grouped ? (
           grouped.map(([areaId, tasks]) => (

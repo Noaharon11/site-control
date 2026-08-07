@@ -73,7 +73,7 @@ export function NewTaskSheet({
   function save() {
     if (!title.trim()) return
     const person = state.people.find((p) => p.id === assigneeId)
-    const group: PersonGroup = person?.group ?? "me"
+    const group: PersonGroup = assigneeId === "me" ? "me" : person?.group ?? "me"
     const task: Task = {
       id: uid("tk"),
       title: title.trim(),
@@ -103,7 +103,7 @@ export function NewTaskSheet({
     toast.success("משימה נוצרה", {
       description: state.offline
         ? "נשמר במכשיר – יסונכרן כשהקליטה תחזור"
-        : `${task.areaId ? areaName(state, task.areaId) + " • " : ""}${person?.name ?? "אני"}`,
+        : `${task.areaId ? areaName(state, task.areaId) + " • " : ""}${assigneeId === "me" ? "אני" : person?.name ?? "לא הוקצה"}`,
     })
   }
 
@@ -150,11 +150,14 @@ export function NewTaskSheet({
             <SelectContent>
               {(["me", "team", "contractor"] as const).map((g) => (
                 <SelectGroup key={g}>
+                  {g === "me" && (
+                    <SelectItem value="me">אני — {GROUP_LABEL.me}</SelectItem>
+                  )}
                   {state.people
-                    .filter((p) => p.group === g && p.active !== false)
+                    .filter((p) => p.group === g && p.active !== false && p.id !== "me")
                     .map((p) => (
                       <SelectItem key={p.id} value={p.id}>
-                        {p.id === "me" ? "אני" : `${p.name} — ${GROUP_LABEL[g]}`}
+                        {`${p.name} — ${GROUP_LABEL[g]}`}
                       </SelectItem>
                     ))}
                 </SelectGroup>

@@ -230,6 +230,11 @@ export function UsersManager() {
                 {query ? "לא נמצאו תוצאות לחיפוש" : "עדיין לא נוספו משתמשים"}
               </EmptyDescription>
             </EmptyHeader>
+            {!query && (
+              <Button size="sm" onClick={openCreate}>
+                + הוסף משתמש
+              </Button>
+            )}
           </Empty>
         ) : (
           <ul className="flex flex-col gap-2">

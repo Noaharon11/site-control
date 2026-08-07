@@ -22,12 +22,36 @@ import type {
 } from "./types"
 
 const STORAGE_KEY = "rakafot.pm.v1"
+const STORAGE_VERSION = 2
+
+const DEMO_PERSON_IDS = new Set([
+  "me",
+  "p-yossi",
+  "p-ahmad",
+  "p-david",
+  "c-cohen",
+  "c-elec",
+  "c-alum",
+  "c-plumb",
+  "c-paint",
+  "c-gypsum",
+  "c-doors",
+])
+const DEMO_USER_IDS = new Set(["u-1", "u-2"])
+const DEMO_TASK_IDS = new Set(Array.from({ length: 27 }, (_, i) => `tk-${i + 1}`))
+const DEMO_BLOCKER_IDS = new Set(Array.from({ length: 6 }, (_, i) => `bl-${i + 1}`))
+const DEMO_DEFECT_IDS = new Set(Array.from({ length: 6 }, (_, i) => `d-${i + 1}`))
+const DEMO_DECISION_IDS = new Set(Array.from({ length: 4 }, (_, i) => `dc-${i + 1}`))
+const DEMO_OBSERVATION_IDS = new Set(Array.from({ length: 8 }, (_, i) => `ob-${i + 1}`))
+const DEMO_PHOTO_IDS = new Set(Array.from({ length: 12 }, (_, i) => `ph-${i + 1}`))
+const DEMO_TOUR_IDS = new Set(["t-0", "t-1", "t-2"])
+const DEMO_ACTIVITY_IDS = new Set(Array.from({ length: 6 }, (_, i) => `ac-${i + 1}`))
+const DEMO_DAY_TARGET_IDS = new Set(["dt-1", "dt-2", "dt-3"])
 
 /* ------------------------------------------------------------- reducer ---- */
 
 type Action =
   | { type: "hydrate"; state: ProjectState }
-  | { type: "reset" }
   | { type: "toggleOffline"; value?: boolean }
   | { type: "sync" }
   /* ---- project ---- */
@@ -106,9 +130,6 @@ function reducer(state: ProjectState, action: Action): ProjectState {
   switch (action.type) {
     case "hydrate":
       return action.state
-
-    case "reset":
-      return createSeedState()
 
     case "toggleOffline": {
       const offline = action.value ?? !state.offline
@@ -444,6 +465,189 @@ function reducer(state: ProjectState, action: Action): ProjectState {
   }
 }
 
+function isRecord(x: unknown): x is Record<string, unknown> {
+  return typeof x === "object" && x !== null
+}
+
+function asStateEnvelope(raw: unknown): ProjectState | null {
+  if (!isRecord(raw)) return null
+  if ("state" in raw && isRecord(raw.state)) return raw.state as ProjectState
+  return raw as ProjectState
+}
+
+function normalizeStateShape(loaded: ProjectState): ProjectState {
+  const seed = createSeedState()
+  const base = loaded as Partial<ProjectState>
+
+  return {
+    ...seed,
+    ...base,
+    project: {
+      ...seed.project,
+      ...(base.project ?? {}),
+    },
+    tourRoute: base.tourRoute ?? seed.tourRoute,
+    areas: (base.areas ?? seed.areas).map((a) => ({ active: true, ...a })),
+    people: (base.people ?? []).map((p) => ({ active: true, ...p })),
+    users: (base.users ?? []).map((u) => ({ active: true, ...u })),
+    tasks: base.tasks ?? [],
+    observations: base.observations ?? [],
+    blockers: base.blockers ?? [],
+    defects: base.defects ?? [],
+    decisions: base.decisions ?? [],
+    photos: base.photos ?? [],
+    tours: base.tours ?? [],
+    activity: base.activity ?? [],
+    dayTargets: base.dayTargets ?? [],
+    offline: base.offline ?? false,
+    pendingCount: base.pendingCount ?? 0,
+    lastSyncAt: base.lastSyncAt ?? null,
+  }
+}
+
+function stripDemoData(state: ProjectState): ProjectState {
+  const removedPersonIds = new Set(
+    state.people.filter((p) => DEMO_PERSON_IDS.has(p.id)).map((p) => p.id),
+  )
+  const removedUserIds = new Set(
+    state.users.filter((u) => DEMO_USER_IDS.has(u.id)).map((u) => u.id),
+  )
+
+  const people = state.people.filter((p) => !DEMO_PERSON_IDS.has(p.id))
+  const users = state.users.filter((u) => !DEMO_USER_IDS.has(u.id))
+
+  const tasks = state.tasks.filter(
+    (t) => !DEMO_TASK_IDS.has(t.id) && !removedPersonIds.has(t.assigneeId) && !DEMO_PERSON_IDS.has(t.assigneeId),
+  )
+  const taskIds = new Set(tasks.map((t) => t.id))
+
+  const blockers = state.blockers.filter(
+    (b) => !DEMO_BLOCKER_IDS.has(b.id) && (!b.taskId || taskIds.has(b.taskId)),
+  )
+  const blockerIds = new Set(blockers.map((b) => b.id))
+
+  const defects = state.defects.filter(
+    (d) => !DEMO_DEFECT_IDS.has(d.id) && (!d.assigneeId || !DEMO_PERSON_IDS.has(d.assigneeId)),
+  )
+  const defectIds = new Set(defects.map((d) => d.id))
+
+  const decisions = state.decisions
+    .filter((d) => !DEMO_DECISION_IDS.has(d.id) && !DEMO_PERSON_IDS.has(d.contractorId))
+    .map((d) => ({ ...d, taskIds: d.taskIds.filter((id) => taskIds.has(id)) }))
+
+  const observations = state.observations.filter((o) => !DEMO_OBSERVATION_IDS.has(o.id))
+
+  const photos = state.photos.filter(
+    (p) =>
+      !DEMO_PHOTO_IDS.has(p.id) &&
+      (!p.taskId || taskIds.has(p.taskId)) &&
+      (!p.defectId || defectIds.has(p.defectId)),
+  )
+
+  const tours = state.tours
+    .filter((t) => !DEMO_TOUR_IDS.has(t.id))
+    .map((tour) => ({
+      ...tour,
+      visits: Object.fromEntries(
+        Object.entries(tour.visits ?? {}).map(([areaId, visit]) => [
+          areaId,
+          {
+            ...visit,
+            taskIds: (visit.taskIds ?? []).filter((id) => taskIds.has(id)),
+            blockerIds: (visit.blockerIds ?? []).filter((id) => blockerIds.has(id)),
+            defectIds: (visit.defectIds ?? []).filter((id) => defectIds.has(id)),
+            decisionIds: (visit.decisionIds ?? []).filter((id) => decisions.some((d) => d.id === id)),
+            photoIds: (visit.photoIds ?? []).filter((id) => photos.some((p) => p.id === id)),
+            observationIds: (visit.observationIds ?? []).filter((id) => observations.some((o) => o.id === id)),
+          },
+        ]),
+      ),
+    }))
+
+  const removedRefIds = new Set<string>([
+    ...removedPersonIds,
+    ...removedUserIds,
+    ...Array.from(DEMO_ACTIVITY_IDS),
+    ...Array.from(DEMO_TASK_IDS),
+    ...Array.from(DEMO_BLOCKER_IDS),
+    ...Array.from(DEMO_DEFECT_IDS),
+    ...Array.from(DEMO_DECISION_IDS),
+    ...Array.from(DEMO_OBSERVATION_IDS),
+    ...Array.from(DEMO_PHOTO_IDS),
+    ...Array.from(DEMO_TOUR_IDS),
+    ...Array.from(DEMO_DAY_TARGET_IDS),
+  ])
+
+  const activity = state.activity.filter(
+    (a) =>
+      !DEMO_ACTIVITY_IDS.has(a.id) &&
+      (!a.personId || !removedRefIds.has(a.personId)) &&
+      (!a.refId || !removedRefIds.has(a.refId)),
+  )
+
+  const dayTargets = state.dayTargets.filter(
+    (t) => !DEMO_DAY_TARGET_IDS.has(t.id) && (!t.taskId || taskIds.has(t.taskId)),
+  )
+
+  return {
+    ...state,
+    people,
+    users,
+    tasks,
+    blockers,
+    defects,
+    decisions,
+    observations,
+    photos,
+    tours,
+    activity,
+    dayTargets,
+  }
+}
+
+function ensureTodayTour(state: ProjectState): ProjectState {
+  const activeAreaIds = new Set(state.areas.filter((a) => a.active !== false).map((a) => a.id))
+  const defaultRoute =
+    (state.tourRoute ?? []).filter((id) => activeAreaIds.has(id)).length > 0
+      ? (state.tourRoute ?? []).filter((id) => activeAreaIds.has(id))
+      : state.areas
+          .filter((a) => a.active !== false)
+          .sort((a, b) => a.routeOrder - b.routeOrder)
+          .map((a) => a.id)
+
+  const normalizeTour = (tour: Tour): Tour => {
+    const route = (tour.routeAreaIds ?? []).filter((id) => activeAreaIds.has(id))
+    const routeAreaIds = route.length > 0 ? route : defaultRoute
+    const visits = Object.fromEntries(
+      routeAreaIds.map((id) => {
+        const existing = tour.visits?.[id]
+        return [id, existing ? { ...emptyVisit(id), ...existing, areaId: id } : emptyVisit(id)]
+      }),
+    )
+    return {
+      ...tour,
+      routeAreaIds,
+      visits,
+    }
+  }
+
+  const tours = (state.tours ?? []).map(normalizeTour)
+  if (tours.some((t) => t.date === today())) return { ...state, tours }
+
+  const todayTour: Tour = {
+    id: `t-${today()}`,
+    date: today(),
+    startedAt: null,
+    endedAt: null,
+    status: "planned",
+    routeAreaIds: defaultRoute,
+    visits: Object.fromEntries(defaultRoute.map((id) => [id, emptyVisit(id)])),
+    topPriorities: [],
+  }
+
+  return { ...state, tours: [...tours, todayTour] }
+}
+
 /* ------------------------------------------------------------- context ---- */
 
 interface StoreValue {
@@ -464,28 +668,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY)
       if (raw) {
-        const parsed = JSON.parse(raw) as { savedFor: string; state: ProjectState }
-        // a stale demo day would show yesterday's tour as today's – reseed instead
-        if (parsed.savedFor === today()) {
-          const loaded = parsed.state
-          // backwards-compat: fill in fields added in later versions
-          const seed = createSeedState()
-          const compatible: ProjectState = {
-            ...loaded,
-            project: {
-              ...seed.project,
-              ...loaded.project,
-            },
-            tourRoute: loaded.tourRoute ?? seed.tourRoute,
-            users: loaded.users ?? seed.users,
-            areas: loaded.areas.map((a) => ({ active: true, ...a })),
-            people: loaded.people.map((p) => ({ active: true, ...p })),
-          }
-          dispatch({ type: "hydrate", state: compatible })
+        const parsed = JSON.parse(raw) as unknown
+        const envelope = asStateEnvelope(parsed)
+        if (envelope) {
+          const next = ensureTodayTour(stripDemoData(normalizeStateShape(envelope)))
+          dispatch({ type: "hydrate", state: next })
         }
       }
     } catch {
-      /* ignore corrupt demo data */
+      /* ignore corrupt stored data */
     }
     setHydrated(true)
   }, [])
@@ -493,9 +684,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     if (!hydrated) return
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ savedFor: today(), state }))
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: STORAGE_VERSION, state }))
     } catch {
-      /* storage full – demo continues in memory */
+      /* storage full – app continues in memory */
     }
   }, [state, hydrated])
 
@@ -507,14 +698,6 @@ export function useStore() {
   const ctx = React.useContext(StoreContext)
   if (!ctx) throw new Error("useStore must be used inside StoreProvider")
   return ctx
-}
-
-export function clearDemoData() {
-  try {
-    window.localStorage.removeItem(STORAGE_KEY)
-  } catch {
-    /* noop */
-  }
 }
 
 export { dayOffset }

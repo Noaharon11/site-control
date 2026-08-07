@@ -46,9 +46,10 @@ export function personById(s: ProjectState, id: string) {
 }
 
 export function personName(s: ProjectState, id: string) {
+  if (id === "me") return "אני"
   const p = personById(s, id)
   if (!p) return "לא הוקצה"
-  return p.id === "me" ? "אני" : p.name
+  return p.name
 }
 
 export function areaById(s: ProjectState, id: string | null | undefined) {
@@ -90,26 +91,13 @@ export function activeContractorsToday(s: ProjectState): string[] {
       if (v.activeToday) v.teamIds.forEach((id) => ids.add(id))
     })
   }
-  // before the tour starts, fall back to yesterday's picture so the
-  // dashboard is never empty in the demo
-  if (ids.size === 0) {
-    s.tasks
-      .filter((t) => isOpen(t) && t.assigneeGroup === "contractor" && t.status === "in_progress")
-      .forEach((t) => ids.add(t.assigneeId))
-  }
   return [...ids]
 }
 
 export function idleAreas(s: ProjectState): Area[] {
   const tour = currentTour(s)
-  if (tour && tour.status !== "planned") {
-    const idle = s.areas.filter((a) => tour.visits[a.id]?.activeToday === false)
-    if (idle.length) return idle
-  }
-  // demo fallback: areas with no open in-progress work at all
-  return s.areas.filter(
-    (a) => !s.tasks.some((t) => t.areaId === a.id && t.status === "in_progress"),
-  ).slice(0, 4)
+  if (!tour || tour.status === "planned") return []
+  return s.areas.filter((a) => tour.visits[a.id]?.activeToday === false)
 }
 
 /* ------------------------------------------------------------- health ----- */
@@ -237,17 +225,6 @@ export function insights(s: ProjectState): Insight[] {
       severity: "info",
       text: `${idle.length} אזורים ללא פעילות מדווחת: ${idle.slice(0, 3).map((a) => a.name).join(", ")}.`,
       href: "/status?filter=idle",
-    })
-  }
-
-  // risk chain
-  const alum = s.tasks.find((t) => t.id === "tk-3")
-  if (alum && isOpen(alum)) {
-    out.push({
-      id: "ins-alum",
-      severity: "crit",
-      text: "אם האלומיניום לא ייכנס עד יום שני, עבודות הגמר בחזית המערבית עלולות להיפגע.",
-      href: "/tasks?tab=critical",
     })
   }
 

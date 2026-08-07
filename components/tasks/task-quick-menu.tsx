@@ -117,8 +117,16 @@ export function TaskQuickMenu({ task, trigger }: { task: Task; trigger: React.Re
               {(["me", "team", "contractor"] as const).map((group) => (
                 <DropdownMenuGroup key={group}>
                   <DropdownMenuLabel>{GROUP_LABEL[group]}</DropdownMenuLabel>
+                  {group === "me" && (
+                    <DropdownMenuItem
+                      onClick={() => reassign("me", "me", "אני")}
+                      disabled={task.assigneeId === "me"}
+                    >
+                      אני
+                    </DropdownMenuItem>
+                  )}
                   {state.people
-                    .filter((p) => p.group === group)
+                    .filter((p) => p.group === group && p.active !== false && p.id !== "me")
                     .map((p) => (
                       <DropdownMenuItem
                         key={p.id}

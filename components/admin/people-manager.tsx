@@ -309,11 +309,16 @@ export function PeopleManager({
           <Empty className="rounded-xl border border-border bg-card py-12">
             <EmptyHeader>
               <EmptyMedia variant="icon"><Users /></EmptyMedia>
-              <EmptyTitle>אין רשומות</EmptyTitle>
+              <EmptyTitle>{isContractor ? "אין קבלנים" : "אין עובדים"}</EmptyTitle>
               <EmptyDescription>
                 {query ? "לא נמצאו תוצאות לחיפוש" : `עדיין לא נוספו ${isContractor ? "קבלנים" : "עובדים"}`}
               </EmptyDescription>
             </EmptyHeader>
+            {!query && (
+              <Button size="sm" onClick={openCreate}>
+                {addLabel}
+              </Button>
+            )}
           </Empty>
         ) : (
           <ul className="flex flex-col gap-2">

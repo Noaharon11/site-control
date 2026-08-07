@@ -584,7 +584,7 @@ function BlockerForm({ areaId, onDone }: { areaId: string; onDone: () => void })
           id: taskId,
           title: `לטפל בחסם: ${text.trim()}`,
           areaId,
-          assigneeId: "p-me",
+          assigneeId: "me",
           assigneeGroup: "me",
           priority: "critical",
           status: "new",
@@ -657,11 +657,11 @@ function TaskForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
   const { state, dispatch, uid } = useStore()
   const tour = state.tours.find((t) => t.date === today())
   const [title, setTitle] = React.useState("")
-  const [assigneeId, setAssigneeId] = React.useState("p-me")
+  const [assigneeId, setAssigneeId] = React.useState("me")
   const [priority, setPriority] = React.useState<"critical" | "high" | "normal">("normal")
   const [due, setDue] = React.useState<"today" | "tomorrow" | "week">("tomorrow")
 
-  const assignees = state.people
+  const assignees = [{ id: "me", name: "אני", group: "me" as const }, ...state.people.filter((p) => p.id !== "me")]
 
   function save() {
     if (!title.trim()) return
@@ -705,7 +705,7 @@ function TaskForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
               selected={assigneeId === p.id}
               onClick={() => setAssigneeId(p.id)}
             >
-              {p.id === "p-me" ? "עליי" : p.name}
+              {p.id === "me" ? "עליי" : p.name}
             </SelectChip>
           ))}
         </div>
@@ -919,7 +919,7 @@ function DealForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
   const [makeTask, setMakeTask] = React.useState(true)
 
   function save() {
-    if (!commitment.trim()) return
+    if (!commitment.trim() || !contractorId) return
     const decisionId = uid("dc")
     const taskIds: string[] = []
     const dueDate = due === "today" ? today() : due === "tomorrow" ? dayPlus(1) : dayPlus(7)
@@ -966,6 +966,11 @@ function DealForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
 
   return (
     <PanelShell>
+      {contractors.length === 0 && (
+        <p className="rounded-lg border border-dashed border-border bg-muted/40 p-3 text-[13px] text-muted-foreground">
+          עדיין לא נוספו קבלנים. אפשר להוסיף קבלן דרך מסך הניהול ואז לחזור לסיכום בשטח.
+        </p>
+      )}
       <div>
         <p className="pb-2 text-[13px] font-bold text-foreground">עם מי דיברת?</p>
         <div className="flex flex-wrap gap-2">
@@ -1040,7 +1045,7 @@ function DealForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
         פתח משימה על הקבלן למעקב
       </label>
       <div className="flex gap-2">
-        <Button className="h-11 flex-1" onClick={save} disabled={!commitment.trim()}>
+        <Button className="h-11 flex-1" onClick={save} disabled={!commitment.trim() || !contractorId}>
           שמור סיכום
         </Button>
         <Button variant="ghost" className="h-11" onClick={onDone}>
