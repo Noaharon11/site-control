@@ -1,0 +1,163 @@
+"use client"
+
+import * as React from "react"
+import { CalendarPlus, Check, Loader2, Hand, Clock, UserCog, CircleDot } from "lucide-react"
+import { toast } from "sonner"
+import { useStore } from "@/lib/store"
+import { dayOffset, today } from "@/lib/dates"
+import { GROUP_LABEL, STATUS_LABEL, type Task, type TaskStatus } from "@/lib/types"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+
+const STATUS_OPTIONS: { value: TaskStatus; icon: React.ComponentType<{ className?: string }> }[] = [
+  { value: "open", icon: CircleDot },
+  { value: "in_progress", icon: Loader2 },
+  { value: "waiting", icon: Clock },
+  { value: "blocked", icon: Hand },
+  { value: "done", icon: Check },
+]
+
+export function TaskQuickMenu({ task, trigger }: { task: Task; trigger: React.ReactElement }) {
+  const { state, dispatch } = useStore()
+
+  function setStatus(status: TaskStatus) {
+    dispatch({ type: "updateTask", id: task.id, patch: { status } })
+    toast.success(
+      status === "done" ? `הושלם: ${task.title}` : `הסטטוס עודכן ל"${STATUS_LABEL[status]}"`,
+      state.offline ? { description: "נשמר במכשיר – יסונכרן כשהקליטה תחזור" } : undefined,
+    )
+  }
+
+  function snooze(days: number, label: string) {
+    dispatch({
+      type: "updateTask",
+      id: task.id,
+      patch: { dueDate: dayOffset(days) },
+      note: `יעד נדחה ל${label}`,
+    })
+    toast(`היעד נדחה ל${label}`)
+  }
+
+  function reassign(id: string, group: Task["assigneeGroup"], name: string) {
+    dispatch({
+      type: "updateTask",
+      id: task.id,
+      patch: { assigneeId: id, assigneeGroup: group },
+      note: `הוקצה מחדש ל${name}`,
+    })
+    toast(`הוקצה ל${name}`)
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={trigger} />
+      <DropdownMenuContent align="start" className="w-56">
+        <DropdownMenuLabel className="truncate">{task.title}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+
+        <DropdownMenuGroup>
+          {task.status !== "done" && (
+            <DropdownMenuItem onClick={() => setStatus("done")}>
+              <Check className="text-ok" />
+              סמן כהושלם
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <CircleDot />
+              שנה סטטוס
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="min-w-40">
+              <DropdownMenuGroup>
+                {STATUS_OPTIONS.map((opt) => (
+                  <DropdownMenuItem
+                    key={opt.value}
+                    onClick={() => setStatus(opt.value)}
+                    disabled={opt.value === task.status}
+                  >
+                    <opt.icon />
+                    {STATUS_LABEL[opt.value]}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <CalendarPlus />
+              דחה יעד
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="min-w-40">
+              <DropdownMenuGroup>
+                <DropdownMenuItem onClick={() => snooze(0, "היום")}>היום</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => snooze(1, "מחר")}>מחר</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => snooze(2, "מחרתיים")}>מחרתיים</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => snooze(7, "שבוע הבא")}>שבוע הבא</DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <UserCog />
+              הקצה מחדש
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="max-h-72 min-w-48 overflow-y-auto">
+              {(["me", "team", "contractor"] as const).map((group) => (
+                <DropdownMenuGroup key={group}>
+                  <DropdownMenuLabel>{GROUP_LABEL[group]}</DropdownMenuLabel>
+                  {state.people
+                    .filter((p) => p.group === group)
+                    .map((p) => (
+                      <DropdownMenuItem
+                        key={p.id}
+                        onClick={() => reassign(p.id, p.group, p.name)}
+                        disabled={p.id === task.assigneeId}
+                      >
+                        {p.name}
+                      </DropdownMenuItem>
+                    ))}
+                </DropdownMenuGroup>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        </DropdownMenuGroup>
+
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuItem
+            onClick={() => {
+              dispatch({
+                type: "updateTask",
+                id: task.id,
+                patch: { priority: task.priority === "critical" ? "normal" : "critical" },
+                note: task.priority === "critical" ? "הורד מעדיפות קריטית" : "הועלה לעדיפות קריטית",
+              })
+              toast(task.priority === "critical" ? "העדיפות עודכנה ל\u05e8\u05d2\u05d9\u05dc" : "סומן כקריטי")
+            }}
+          >
+            <Hand />
+            {task.priority === "critical" ? "בטל סימון קריטי" : "סמן כקריטי"}
+          </DropdownMenuItem>
+          {task.dueDate !== today() && task.status !== "done" && (
+            <DropdownMenuItem onClick={() => snooze(0, "היום")}>
+              <CalendarPlus />
+              העבר להיום
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
