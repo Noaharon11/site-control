@@ -136,7 +136,7 @@ export function TourSummary({ tour }: { tour: Tour }) {
 
       {!done && (
         <div className="sticky bottom-16 lg:bottom-0">
-          <Button className="h-12 w-full text-[15px]" onClick={finish} disabled={picked.length === 0}>
+          <Button className="h-12 w-full text-[15px]" onClick={finish} disabled={suggestions.length > 0 && picked.length === 0}>
             <Check data-icon="inline-start" />
             סיים סיור וקבע יעדי יום
           </Button>

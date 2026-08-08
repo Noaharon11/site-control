@@ -115,3 +115,28 @@ export function greeting(): string {
   if (h < 17) return "צהריים טובים"
   return "ערב טוב"
 }
+
+/** "08.08.2026" – Hebrew-style DD.MM.YYYY */
+export function heDate(d: ISODate): string {
+  const date = parseISO(d)
+  return `${String(date.getDate()).padStart(2, "0")}.${String(date.getMonth() + 1).padStart(2, "0")}.${date.getFullYear()}`
+}
+
+/** Difference in minutes between two "HH:MM" strings, or null */
+export function minutesBetween(start: string | null, end: string | null): number | null {
+  if (!start || !end) return null
+  const [sh, sm] = start.split(":").map(Number)
+  const [eh, em] = end.split(":").map(Number)
+  const diff = (eh * 60 + em) - (sh * 60 + sm)
+  return diff > 0 ? diff : null
+}
+
+/** "1 שעה 6 דקות" / "45 דקות" */
+export function durationLabel(minutes: number | null): string {
+  if (!minutes) return ""
+  if (minutes < 60) return `${minutes} דקות`
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  const hLabel = h === 1 ? "שעה" : `${h} שעות`
+  return m > 0 ? `${hLabel} ${m} דקות` : hLabel
+}
