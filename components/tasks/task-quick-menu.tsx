@@ -28,47 +28,51 @@ const STATUS_OPTIONS: { value: TaskStatus; icon: React.ComponentType<{ className
 ]
 
 export function TaskQuickMenu({ task, trigger }: { task: Task; trigger: React.ReactElement }) {
-  const { state, dispatch } = useStore()
+  const { state, dispatch, commitAction } = useStore()
   const hasValidTaskId = typeof task.id === "string" && task.id.trim().length > 0
 
-  function setStatus(status: TaskStatus) {
+  async function setStatus(status: TaskStatus) {
     if (!hasValidTaskId) return
-    dispatch({ type: "updateTask", id: task.id, patch: { status } })
+    const result = await commitAction({ type: "updateTask", id: task.id, patch: { status } })
+    if (!result.ok) return
     toast.success(
       status === "done" ? `הושלם: ${task.title}` : `הסטטוס עודכן ל"${STATUS_LABEL[status]}"`,
       state.offline ? { description: "נשמר במכשיר – יסונכרן כשהקליטה תחזור" } : undefined,
     )
   }
 
-  function snooze(days: number, label: string) {
+  async function snooze(days: number, label: string) {
     if (!hasValidTaskId) return
-    dispatch({
+    const result = await commitAction({
       type: "updateTask",
       id: task.id,
       patch: { dueDate: dayOffset(days) },
       note: `יעד נדחה ל${label}`,
     })
+    if (!result.ok) return
     toast(`היעד נדחה ל${label}`)
   }
 
-  function reassign(id: string, group: Task["assigneeGroup"], name: string) {
+  async function reassign(id: string, group: Task["assigneeGroup"], name: string) {
     if (!hasValidTaskId) return
-    dispatch({
+    const result = await commitAction({
       type: "updateTask",
       id: task.id,
       patch: { assigneeId: id, assigneeGroup: group },
       note: `הוקצה מחדש ל${name}`,
     })
+    if (!result.ok) return
     toast(`הוקצה ל${name}`)
   }
 
-  function deleteTask() {
+  async function deleteTask() {
     if (!hasValidTaskId) return
     if (typeof window !== "undefined") {
       const confirmed = window.confirm(`למחוק את המשימה "${task.title}"?`)
       if (!confirmed) return
     }
-    dispatch({ type: "deleteTask", id: task.id })
+    const result = await commitAction({ type: "deleteTask", id: task.id })
+    if (!result.ok) return
     toast.success(`המשימה נמחקה: ${task.title}`)
   }
 
@@ -161,14 +165,15 @@ export function TaskQuickMenu({ task, trigger }: { task: Task; trigger: React.Re
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
           <DropdownMenuItem
-            onClick={() => {
+            onClick={async () => {
               if (!hasValidTaskId) return
-              dispatch({
+              const result = await commitAction({
                 type: "updateTask",
                 id: task.id,
                 patch: { priority: task.priority === "critical" ? "normal" : "critical" },
                 note: task.priority === "critical" ? "הורד מעדיפות קריטית" : "הועלה לעדיפות קריטית",
               })
+              if (!result.ok) return
               toast(task.priority === "critical" ? "העדיפות עודכנה ל\u05e8\u05d2\u05d9\u05dc" : "סומן כקריטי")
             }}
           >

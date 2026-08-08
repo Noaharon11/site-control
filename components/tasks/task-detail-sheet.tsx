@@ -40,7 +40,7 @@ export function TaskDetailSheet({
   taskId: string | null
   onOpenChange: (v: boolean) => void
 }) {
-  const { state, dispatch } = useStore()
+  const { state, dispatch, commitAction } = useStore()
   const [note, setNote] = React.useState("")
   const [areaIds, setAreaIds] = React.useState<string[]>([])
   const task = state.tasks.find((t) => t.id === taskId)
@@ -60,27 +60,30 @@ export function TaskDetailSheet({
   const observation = state.observations.find((o) => o.id === task.observationId)
   const decision = state.decisions.find((d) => d.id === task.decisionId)
 
-  function setStatus(status: TaskStatus) {
-    dispatch({ type: "updateTask", id: task!.id, patch: { status } })
+  async function setStatus(status: TaskStatus) {
+    const result = await commitAction({ type: "updateTask", id: task!.id, patch: { status } })
+    if (!result.ok) return
     toast.success(status === "done" ? "המשימה הושלמה" : `הסטטוס עודכן ל"${STATUS_LABEL[status]}"`)
   }
 
-  function addNote() {
+  async function addNote() {
     if (!note.trim()) return
-    dispatch({ type: "updateTask", id: task!.id, patch: {}, note: note.trim() })
+    const result = await commitAction({ type: "updateTask", id: task!.id, patch: {}, note: note.trim() })
+    if (!result.ok) return
     setNote("")
     toast.success("הערה נוספה ליומן המשימה")
   }
 
-  function saveAreas() {
+  async function saveAreas() {
     if (!task) return
     const next = [...new Set(areaIds.filter(Boolean))]
-    dispatch({
+    const result = await commitAction({
       type: "updateTask",
       id: task.id,
       patch: { areaIds: next },
       note: "עודכן שיוך אזורים למשימה",
     })
+    if (!result.ok) return
     toast.success("שיוך האזורים עודכן")
   }
 
@@ -111,13 +114,14 @@ export function TaskDetailSheet({
           )}
           <Button
             variant="outline"
-            onClick={() => {
-              dispatch({
+            onClick={async () => {
+              const result = await commitAction({
                 type: "updateTask",
                 id: task.id,
                 patch: { dueDate: dayOffset(1) },
                 note: "יעד נדחה למחר",
               })
+              if (!result.ok) return
               toast("היעד נדחה למחר")
             }}
           >

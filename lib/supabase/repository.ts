@@ -194,6 +194,129 @@ async function ensureProject(project: ProjectState["project"]) {
   return data as { id: string; external_id: string }
 }
 
+function toTaskRow(projectId: string, task: Task) {
+  return {
+    project_id: projectId,
+    external_id: task.id,
+    title: task.title,
+    description: task.description ?? null,
+    area_external_id: taskAreaIds(task)[0] ?? null,
+    assignee_external_id: task.assigneeId,
+    assignee_group: task.assigneeGroup,
+    priority: task.priority,
+    status: task.status,
+    due_date: task.dueDate,
+    created_at_date: task.createdAt,
+    source: task.source,
+    tour_external_id: task.tourId ?? null,
+    observation_external_id: task.observationId ?? null,
+    decision_external_id: task.decisionId ?? null,
+    blocker_external_id: task.blockerId ?? null,
+    defect_external_id: task.defectId ?? null,
+    photo_ids: task.photoIds ?? [],
+    completed_at: task.completedAt ?? null,
+    pending: task.pending === true,
+  }
+}
+
+async function upsertTaskRow(projectId: string, task: Task) {
+  const supabase = getSupabaseClient()
+  if (!supabase) return
+
+  debugLog("task:row:start", { projectId, externalId: task.id, title: task.title })
+  const result = await supabase
+    .from("tasks")
+    .upsert(toTaskRow(projectId, task), { onConflict: "project_id,external_id" })
+    .select("project_id, external_id, title")
+    .single()
+
+  debugLog("task:row:result", result)
+  if (result.error || !result.data) throw toError(result.error, "Failed to save task row")
+}
+
+async function replaceTaskEventsForTask(projectId: string, task: Task) {
+  return replaceTaskEvents(projectId, [task])
+}
+
+async function replaceTaskAreasForTask(projectId: string, task: Task) {
+  if (taskAreaIds(task).length <= 1) {
+    try {
+      await replaceTaskAreas(projectId, [task])
+      return
+    } catch (error) {
+      throw error
+    }
+  }
+
+  const supabase = getSupabaseClient()
+  if (!supabase) return
+
+  const probe = await supabase.from("task_areas").select("task_external_id").limit(1)
+  if (isMissingRelationError(probe.error, "task_areas")) {
+    throw new Error("שמירת משימה עם כמה אזורים דורשת את טבלת task_areas ב-Supabase")
+  }
+  if (probe.error) throw toError(probe.error, "Failed to verify task_areas availability")
+
+  await replaceTaskAreas(projectId, [task])
+}
+
+async function saveActivityLogEntry(projectId: string, activity?: ActivityLog) {
+  if (!activity) return
+  const supabase = getSupabaseClient()
+  if (!supabase) return
+
+  const result = await supabase.from("activity_logs").upsert(
+    {
+      project_id: projectId,
+      external_id: activity.id,
+      date: activity.date,
+      time: activity.time,
+      kind: activity.kind,
+      text: activity.text,
+      area_external_id: activity.areaId ?? null,
+      person_external_id: activity.personId ?? null,
+      ref_external_id: activity.refId ?? null,
+    },
+    { onConflict: "project_id,external_id" },
+  )
+
+  if (result.error) {
+    debugLog("task:activity:warning", result.error)
+  }
+}
+
+export async function createTaskInSupabase(
+  project: ProjectState["project"],
+  task: Task,
+  activity?: ActivityLog,
+) {
+  const projectRef = await ensureProject(project)
+  if (!projectRef) return
+
+  debugLog("task:create:start", { projectId: projectRef.id, externalId: task.id, title: task.title })
+  await upsertTaskRow(projectRef.id, task)
+  await replaceTaskEventsForTask(projectRef.id, task)
+  await replaceTaskAreasForTask(projectRef.id, task)
+  await saveActivityLogEntry(projectRef.id, activity)
+  debugLog("task:create:complete", { projectId: projectRef.id, externalId: task.id })
+}
+
+export async function updateTaskInSupabase(
+  project: ProjectState["project"],
+  task: Task,
+  activity?: ActivityLog,
+) {
+  const projectRef = await ensureProject(project)
+  if (!projectRef) return
+
+  debugLog("task:update:start", { projectId: projectRef.id, externalId: task.id, status: task.status })
+  await upsertTaskRow(projectRef.id, task)
+  await replaceTaskEventsForTask(projectRef.id, task)
+  await replaceTaskAreasForTask(projectRef.id, task)
+  await saveActivityLogEntry(projectRef.id, activity)
+  debugLog("task:update:complete", { projectId: projectRef.id, externalId: task.id })
+}
+
 async function replaceRoute(projectId: string, route: string[]) {
   const supabase = getSupabaseClient()
   if (!supabase) return

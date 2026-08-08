@@ -567,19 +567,23 @@ function PanelShell({ children }: { children: React.ReactNode }) {
 }
 
 function BlockerForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
-  const { state, dispatch, uid } = useStore()
+  const { state, dispatch, commitAction, uid } = useStore()
   const tour = state.tours.find((t) => t.date === today())
   const [reason, setReason] = React.useState<BlockerReason>("material")
   const [text, setText] = React.useState("")
   const [alsoTask, setAlsoTask] = React.useState(true)
+  const [isSaving, setIsSaving] = React.useState(false)
+  const [draftBlockerId] = React.useState(() => uid("bl"))
+  const [draftTaskId] = React.useState(() => uid("tk"))
 
-  function save() {
-    if (!text.trim()) return
-    const blockerId = uid("bl")
+  async function save() {
+    if (!text.trim() || isSaving) return
+    setIsSaving(true)
+    const blockerId = draftBlockerId
     let taskId: string | null = null
     if (alsoTask) {
-      taskId = uid("tk")
-      dispatch({
+      taskId = draftTaskId
+      const taskResult = await commitAction({
         type: "addTask",
         task: {
           id: taskId,
@@ -598,6 +602,10 @@ function BlockerForm({ areaId, onDone }: { areaId: string; onDone: () => void })
           history: [{ date: today(), time: nowTime(), text: "נוצר אוטומטית מחסם בסיור" }],
         },
       })
+      if (!taskResult.ok) {
+        setIsSaving(false)
+        return
+      }
     }
     dispatch({
       type: "addBlocker",
@@ -613,6 +621,7 @@ function BlockerForm({ areaId, onDone }: { areaId: string; onDone: () => void })
         streak: 1,
       },
     })
+    setIsSaving(false)
     onDone()
   }
 
@@ -644,7 +653,7 @@ function BlockerForm({ areaId, onDone }: { areaId: string; onDone: () => void })
         פתח גם משימה קריטית עליי לטיפול היום
       </label>
       <div className="flex gap-2">
-        <Button className="h-11 flex-1" onClick={save} disabled={!text.trim()}>
+        <Button className="h-11 flex-1" onClick={() => void save()} disabled={!text.trim() || isSaving}>
           שמור חסם
         </Button>
         <Button variant="ghost" className="h-11" onClick={onDone}>
@@ -656,24 +665,27 @@ function BlockerForm({ areaId, onDone }: { areaId: string; onDone: () => void })
 }
 
 function TaskForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
-  const { state, dispatch, uid } = useStore()
+  const { state, commitAction, uid } = useStore()
   const tour = state.tours.find((t) => t.date === today())
   const [title, setTitle] = React.useState("")
   const [areaIds, setAreaIds] = React.useState<string[]>([areaId])
   const [assigneeId, setAssigneeId] = React.useState("me")
   const [priority, setPriority] = React.useState<"critical" | "high" | "normal">("normal")
   const [due, setDue] = React.useState<"today" | "tomorrow" | "week">("tomorrow")
+  const [isSaving, setIsSaving] = React.useState(false)
+  const [draftTaskId] = React.useState(() => uid("tk"))
 
   const assignees = [{ id: "me", name: "אני", group: "me" as const }, ...state.people.filter((p) => p.id !== "me")]
 
-  function save() {
-    if (!title.trim()) return
+  async function save() {
+    if (!title.trim() || isSaving) return
+    setIsSaving(true)
     const person = assignees.find((p) => p.id === assigneeId)
     const normalizedAreaIds = [...new Set(areaIds.filter(Boolean))]
-    dispatch({
+    const result = await commitAction({
       type: "addTask",
       task: {
-        id: uid("tk"),
+          id: draftTaskId,
         title: title.trim(),
         areaIds: normalizedAreaIds,
         areaId: normalizedAreaIds[0] ?? null,
@@ -688,6 +700,8 @@ function TaskForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
         history: [{ date: today(), time: nowTime(), text: "נוצר בסיור הבוקר" }],
       },
     })
+    setIsSaving(false)
+    if (!result.ok) return
     onDone()
   }
 
@@ -758,7 +772,7 @@ function TaskForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
         </div>
       </div>
       <div className="flex gap-2">
-        <Button className="h-11 flex-1" onClick={save} disabled={!title.trim()}>
+        <Button className="h-11 flex-1" onClick={() => void save()} disabled={!title.trim() || isSaving}>
           שמור משימה
         </Button>
         <Button variant="ghost" className="h-11" onClick={onDone}>
@@ -924,7 +938,7 @@ function PhotoForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
 }
 
 function DealForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
-  const { state, dispatch, uid } = useStore()
+  const { state, dispatch, commitAction, uid } = useStore()
   const tour = state.tours.find((t) => t.date === today())
   const contractors = state.people.filter((p) => p.group === "contractor" && p.active !== false)
   const [contractorId, setContractorId] = React.useState(contractors[0]?.id ?? "")
@@ -933,16 +947,20 @@ function DealForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
   const [commitment, setCommitment] = React.useState("")
   const [due, setDue] = React.useState<"today" | "tomorrow" | "week">("tomorrow")
   const [makeTask, setMakeTask] = React.useState(true)
+  const [isSaving, setIsSaving] = React.useState(false)
+  const [draftDecisionId] = React.useState(() => uid("dc"))
+  const [draftTaskId] = React.useState(() => uid("tk"))
 
-  function save() {
-    if (!commitment.trim() || !contractorId) return
-    const decisionId = uid("dc")
+  async function save() {
+    if (!commitment.trim() || !contractorId || isSaving) return
+    setIsSaving(true)
+    const decisionId = draftDecisionId
     const taskIds: string[] = []
     const dueDate = due === "today" ? today() : due === "tomorrow" ? dayPlus(1) : dayPlus(7)
     if (makeTask) {
-      const taskId = uid("tk")
+      const taskId = draftTaskId
       taskIds.push(taskId)
-      dispatch({
+      const taskResult = await commitAction({
         type: "addTask",
         task: {
           id: taskId,
@@ -961,6 +979,10 @@ function DealForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
           history: [{ date: today(), time: nowTime(), text: "נוצר מסיכום בשטח" }],
         },
       })
+      if (!taskResult.ok) {
+        setIsSaving(false)
+        return
+      }
     }
     dispatch({
       type: "addDecision",
@@ -978,6 +1000,7 @@ function DealForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
         tourId: tour?.id ?? null,
       },
     })
+    setIsSaving(false)
     onDone()
   }
 

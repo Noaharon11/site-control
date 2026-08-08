@@ -55,6 +55,7 @@ export function NewTaskSheet({
 }) {
   const { state, dispatch, commitAction, uid, supabaseReady } = useStore()
   const tour = currentTour(state)
+  const saveInFlightRef = React.useRef(false)
 
   const [title, setTitle] = React.useState(defaultTitle)
   const [description, setDescription] = React.useState("")
@@ -64,6 +65,8 @@ export function NewTaskSheet({
   const [assigneeId, setAssigneeId] = React.useState(defaultAssigneeId ?? "me")
   const [priority, setPriority] = React.useState<Priority>("normal")
   const [dueDays, setDueDays] = React.useState(1)
+  const [draftTaskId, setDraftTaskId] = React.useState(() => uid("tk"))
+  const [isSaving, setIsSaving] = React.useState(false)
 
   React.useEffect(() => {
     if (!open) return
@@ -73,15 +76,20 @@ export function NewTaskSheet({
     setAssigneeId(defaultAssigneeId ?? "me")
     setPriority("normal")
     setDueDays(1)
+    setDraftTaskId(uid("tk"))
+    setIsSaving(false)
+    saveInFlightRef.current = false
   }, [open, defaultTitle, defaultAreaId, defaultAreaIds, defaultAssigneeId])
 
   async function save() {
-    if (!title.trim()) return
+    if (!title.trim() || saveInFlightRef.current) return
+    saveInFlightRef.current = true
+    setIsSaving(true)
     const person = state.people.find((p) => p.id === assigneeId)
     const group: PersonGroup = assigneeId === "me" ? "me" : person?.group ?? "me"
     const normalizedAreaIds = [...new Set(areaIds.filter(Boolean))]
     const task: Task = {
-      id: uid("tk"),
+      id: draftTaskId,
       title: title.trim(),
       description: description.trim() || undefined,
       areaIds: normalizedAreaIds,
@@ -116,6 +124,8 @@ export function NewTaskSheet({
       toast.error("המשימה לא נשמרה", {
         description: "השמירה ל-Supabase נכשלה. אפשר לתקן ולנסות שוב.",
       })
+      saveInFlightRef.current = false
+      setIsSaving(false)
       return
     }
 
@@ -132,6 +142,9 @@ export function NewTaskSheet({
         ? "נשמר במכשיר – יסונכרן כשהקליטה תחזור"
         : `${areaSummary} • ${assigneeId === "me" ? "אני" : person?.name ?? "לא הוקצה"}`,
     })
+    setDraftTaskId(uid("tk"))
+    saveInFlightRef.current = false
+    setIsSaving(false)
   }
 
   return (
@@ -150,9 +163,9 @@ export function NewTaskSheet({
         )
       }
       footer={
-        <Button className="h-12 w-full" onClick={save} disabled={!title.trim()}>
+        <Button className="h-12 w-full" onClick={save} disabled={!title.trim() || isSaving}>
           <Check data-icon="inline-start" />
-          צור משימה
+          {isSaving ? "שומר..." : "צור משימה"}
         </Button>
       }
     >
@@ -163,6 +176,12 @@ export function NewTaskSheet({
             id="nt-title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                void save()
+              }
+            }}
             placeholder="לדוגמה: להכניס צוות חשמל לקומה 5 מערב"
             autoComplete="off"
           />

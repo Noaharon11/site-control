@@ -7,10 +7,12 @@ import { dayOffset, nowTime, today } from "./dates"
 import { isSupabaseConfigured } from "./supabase/client"
 import { clearQueue, enqueueOperation, queueSize, readQueue } from "./supabase/queue"
 import {
+  createTaskInSupabase,
   deleteTaskFromSupabase,
   hasMeaningfulLocalData,
   loadProjectStateFromSupabase,
   saveProjectStateToSupabase,
+  updateTaskInSupabase,
 } from "./supabase/repository"
 import type {
   ActivityKind,
@@ -116,6 +118,10 @@ function isPersistentAction(action: Action) {
     default:
       return true
   }
+}
+
+function isTaskMutationAction(action: Action): action is Extract<Action, { type: "addTask" | "updateTask" | "deleteTask" }> {
+  return action.type === "addTask" || action.type === "updateTask" || action.type === "deleteTask"
 }
 
 function log(
@@ -873,6 +879,24 @@ async function persistQueuedSideEffects(state: ProjectState, queued = readQueue(
   }
 }
 
+async function persistTaskMutation(currentState: ProjectState, nextState: ProjectState, action: Extract<Action, { type: "addTask" | "updateTask" | "deleteTask" }>) {
+  if (action.type === "addTask") {
+    await createTaskInSupabase(nextState.project, action.task, nextState.activity[0])
+    return
+  }
+
+  if (action.type === "updateTask") {
+    const nextTask = nextState.tasks.find((task) => task.id === action.id)
+    if (!nextTask) throw new Error("Task not found after update")
+    await updateTaskInSupabase(nextState.project, nextTask, nextState.activity[0])
+    return
+  }
+
+  const currentTask = currentState.tasks.find((task) => task.id === action.id)
+  if (!currentTask) throw new Error("Task not found before delete")
+  await deleteTaskFromSupabase(currentState.project, currentTask.id)
+}
+
 function withSyncedRuntimeState(state: ProjectState) {
   return {
     ...state,
@@ -980,16 +1004,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setSyncError(null)
 
       try {
-        await saveProjectStateToSupabase(nextState)
-        await persistQueuedSideEffects(nextState, [
-          { id: "commit", type: action.type, at: new Date().toISOString(), action: toQueuedAction(action) },
-        ])
-        const remote = await refreshAuthoritativeState()
+        if (isTaskMutationAction(action)) {
+          await persistTaskMutation(stateRef.current, nextState, action)
+        } else {
+          await saveProjectStateToSupabase(nextState)
+          await persistQueuedSideEffects(nextState, [
+            { id: "commit", type: action.type, at: new Date().toISOString(), action: toQueuedAction(action) },
+          ])
+        }
         clearQueue()
-        baseDispatch({
-          type: "hydrate",
-          state: withSyncedRuntimeState(remote ?? nextState),
-        })
+        baseDispatch({ type: "hydrate", state: withSyncedRuntimeState(nextState) })
         return { ok: true }
       } catch (error) {
         const msg = error instanceof Error ? error.message : "שגיאה לא צפויה בשמירה"

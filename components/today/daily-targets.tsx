@@ -9,7 +9,7 @@ import { personName, taskAreaSummary } from "@/lib/selectors"
 import { relativeDay } from "@/lib/dates"
 
 export function DailyTargets({ onOpenTask }: { onOpenTask: (id: string) => void }) {
-  const { state, dispatch } = useStore()
+  const { state, dispatch, commitAction } = useStore()
   const targets = state.dayTargets
   const doneCount = targets.filter((t) => t.done).length
 
@@ -38,10 +38,11 @@ export function DailyTargets({ onOpenTask }: { onOpenTask: (id: string) => void 
             <li key={t.id} className="flex items-stretch">
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
                   dispatch({ type: "toggleTarget", id: t.id })
                   if (task && !done) {
-                    dispatch({ type: "updateTask", id: task.id, patch: { status: "done" } })
+                    const result = await commitAction({ type: "updateTask", id: task.id, patch: { status: "done" } })
+                    if (!result.ok) return
                   }
                   toast(done ? "הוחזר ליעדי היום" : "יעד הושלם — כל הכבוד")
                 }}
