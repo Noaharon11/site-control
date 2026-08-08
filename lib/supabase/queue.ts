@@ -2,9 +2,10 @@ export interface PendingOperation {
   id: string
   type: string
   at: string
+  action?: Record<string, unknown>
 }
 
-const OFFLINE_QUEUE_KEY = "rakafot.pm.queue.v1"
+const OFFLINE_QUEUE_KEY = "sitecontrol-pending-sync-v1"
 
 function isBrowser() {
   return typeof window !== "undefined"
@@ -46,9 +47,9 @@ function writeQueue(items: PendingOperation[]) {
   }
 }
 
-export function enqueueOperation(type: string) {
+export function enqueueOperation(type: string, action?: Record<string, unknown>) {
   const items = readQueue()
-  items.push({ id: randomId(), type, at: nowIso() })
+  items.push({ id: randomId(), type, at: nowIso(), action })
   writeQueue(items)
 }
 

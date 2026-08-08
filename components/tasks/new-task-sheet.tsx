@@ -53,7 +53,7 @@ export function NewTaskSheet({
   decisionId?: string | null
   onCreated?: (task: Task) => void
 }) {
-  const { state, dispatch, uid } = useStore()
+  const { state, dispatch, commitAction, uid, supabaseReady } = useStore()
   const tour = currentTour(state)
 
   const [title, setTitle] = React.useState(defaultTitle)
@@ -75,7 +75,7 @@ export function NewTaskSheet({
     setDueDays(1)
   }, [open, defaultTitle, defaultAreaId, defaultAreaIds, defaultAssigneeId])
 
-  function save() {
+  async function save() {
     if (!title.trim()) return
     const person = state.people.find((p) => p.id === assigneeId)
     const group: PersonGroup = assigneeId === "me" ? "me" : person?.group ?? "me"
@@ -104,7 +104,21 @@ export function NewTaskSheet({
         },
       ],
     }
-    dispatch({ type: "addTask", task })
+
+    const result = supabaseReady && !state.offline
+      ? await commitAction({ type: "addTask", task })
+      : await Promise.resolve((() => {
+          dispatch({ type: "addTask", task })
+          return { ok: true }
+        })())
+
+    if (!result.ok) {
+      toast.error("המשימה לא נשמרה", {
+        description: "השמירה ל-Supabase נכשלה. אפשר לתקן ולנסות שוב.",
+      })
+      return
+    }
+
     onCreated?.(task)
     onOpenChange(false)
     const areaSummary =

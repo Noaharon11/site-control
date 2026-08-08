@@ -1,11 +1,13 @@
 "use client"
 
 import * as React from "react"
+import { toast } from "sonner"
 import { createSeedState, emptyVisit } from "./seed"
 import { dayOffset, nowTime, today } from "./dates"
 import { isSupabaseConfigured } from "./supabase/client"
-import { clearQueue, enqueueOperation, queueSize } from "./supabase/queue"
+import { clearQueue, enqueueOperation, queueSize, readQueue } from "./supabase/queue"
 import {
+  deleteTaskFromSupabase,
   hasMeaningfulLocalData,
   loadProjectStateFromSupabase,
   saveProjectStateToSupabase,
@@ -28,8 +30,9 @@ import type {
   User,
 } from "./types"
 
-const STORAGE_KEY = "rakafot.pm.v1"
-const STORAGE_VERSION = 3
+const CACHE_STORAGE_KEY = "sitecontrol-cache-v1"
+const LEGACY_STORAGE_KEY = "rakafot.pm.v1"
+const CACHE_STORAGE_VERSION = 1
 
 const DEMO_PERSON_IDS = new Set([
   "me",
@@ -630,9 +633,7 @@ function stripDemoData(state: ProjectState): ProjectState {
   const people = state.people.filter((p) => !DEMO_PERSON_IDS.has(p.id))
   const users = state.users.filter((u) => !DEMO_USER_IDS.has(u.id))
 
-  const tasks = state.tasks.filter(
-    (t) => !DEMO_TASK_IDS.has(t.id) && !removedPersonIds.has(t.assigneeId) && !DEMO_PERSON_IDS.has(t.assigneeId),
-  )
+  const tasks = state.tasks.filter((t) => !DEMO_TASK_IDS.has(t.id))
   const taskIds = new Set(tasks.map((t) => t.id))
 
   const blockers = state.blockers.filter(
@@ -640,13 +641,11 @@ function stripDemoData(state: ProjectState): ProjectState {
   )
   const blockerIds = new Set(blockers.map((b) => b.id))
 
-  const defects = state.defects.filter(
-    (d) => !DEMO_DEFECT_IDS.has(d.id) && (!d.assigneeId || !DEMO_PERSON_IDS.has(d.assigneeId)),
-  )
+  const defects = state.defects.filter((d) => !DEMO_DEFECT_IDS.has(d.id))
   const defectIds = new Set(defects.map((d) => d.id))
 
   const decisions = state.decisions
-    .filter((d) => !DEMO_DECISION_IDS.has(d.id) && !DEMO_PERSON_IDS.has(d.contractorId))
+    .filter((d) => !DEMO_DECISION_IDS.has(d.id))
     .map((d) => ({ ...d, taskIds: d.taskIds.filter((id) => taskIds.has(id)) }))
 
   const observations = state.observations.filter((o) => !DEMO_OBSERVATION_IDS.has(o.id))
@@ -768,24 +767,140 @@ interface StoreValue {
   state: ProjectState
   hydrated: boolean
   dispatch: React.Dispatch<Action>
+  commitAction: (action: Action) => Promise<{ ok: boolean; error?: string }>
   syncNow: () => Promise<void>
   syncing: boolean
   syncError: string | null
+  loadError: string | null
   supabaseReady: boolean
   bootstrapping: boolean
+  usingCachedFallback: boolean
+  retryLoad: () => void
   /** helpers used across screens */
   uid: (prefix: string) => string
 }
 
 const StoreContext = React.createContext<StoreValue | null>(null)
 
+function isDevelopment() {
+  return process.env.NODE_ENV !== "production"
+}
+
+function humanizePersistenceError(message: string) {
+  if (/invalid api key|unauthorized/i.test(message)) {
+    return "החיבור ל-Supabase נכשל: מפתח הגישה אינו תקין"
+  }
+  if (/row level security|permission denied/i.test(message)) {
+    return "השמירה ל-Supabase נחסמה בהרשאות הגישה"
+  }
+  return `השמירה ל-Supabase נכשלה: ${message}`
+}
+
+function humanizeLoadError(message: string) {
+  if (/invalid api key|unauthorized/i.test(message)) {
+    return "לא ניתן לטעון נתונים מ-Supabase כי מפתח הגישה אינו תקין"
+  }
+  if (/row level security|permission denied/i.test(message)) {
+    return "לא ניתן לטעון נתונים מ-Supabase בגלל הרשאות גישה"
+  }
+  return `לא ניתן לטעון את הנתונים: ${message}`
+}
+
+function normalizeLoadedState(state: ProjectState) {
+  return ensureTodayTour(normalizeStateShape(state))
+}
+
+function readCachedState() {
+  if (typeof window === "undefined") return createSeedState()
+
+  const sources = [CACHE_STORAGE_KEY, LEGACY_STORAGE_KEY]
+  for (const key of sources) {
+    try {
+      const raw = window.localStorage.getItem(key)
+      if (!raw) continue
+      const parsed = JSON.parse(raw) as unknown
+      const envelope = asStateEnvelope(parsed)
+      if (envelope) {
+        return key === LEGACY_STORAGE_KEY
+          ? ensureTodayTour(stripDemoData(normalizeStateShape(envelope)))
+          : normalizeLoadedState(envelope)
+      }
+    } catch {
+      // Ignore corrupt cache and continue to the next source.
+    }
+  }
+
+  return normalizeLoadedState(createSeedState())
+}
+
+function writeCachedState(state: ProjectState) {
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.setItem(
+      CACHE_STORAGE_KEY,
+      JSON.stringify({ version: CACHE_STORAGE_VERSION, savedAt: new Date().toISOString(), state }),
+    )
+  } catch {
+    // Ignore storage failures: app continues in memory.
+  }
+}
+
+function toQueuedAction(action: Action): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(action)) as Record<string, unknown>
+}
+
+function asQueuedAction(raw: unknown): Action | null {
+  if (!isRecord(raw)) return null
+  if (typeof raw.type !== "string") return null
+  return raw as unknown as Action
+}
+
+function replayPendingMutations(baseState: ProjectState, queued = readQueue()) {
+  return queued.reduce((current, item) => {
+    const action = asQueuedAction(item.action)
+    if (!action || !isPersistentAction(action)) return current
+    return reducer({ ...current, offline: false }, action)
+  }, baseState)
+}
+
+async function persistQueuedSideEffects(state: ProjectState, queued = readQueue()) {
+  for (const item of queued) {
+    const action = asQueuedAction(item.action)
+    if (!action) continue
+    if (action.type === "deleteTask") {
+      await deleteTaskFromSupabase(state.project, action.id)
+    }
+  }
+}
+
+function withSyncedRuntimeState(state: ProjectState) {
+  return {
+    ...state,
+    offline: false,
+    pendingCount: 0,
+    lastSyncAt: nowTime(),
+  }
+}
+
+function comparableState(state: ProjectState) {
+  return {
+    ...state,
+    offline: false,
+    pendingCount: 0,
+    lastSyncAt: null,
+  }
+}
+
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [state, baseDispatch] = React.useReducer(reducer, null, createSeedState)
   const [hydrated, setHydrated] = React.useState(false)
   const [syncing, setSyncing] = React.useState(false)
   const [syncError, setSyncError] = React.useState<string | null>(null)
+  const [loadError, setLoadError] = React.useState<string | null>(null)
   const [bootstrapping, setBootstrapping] = React.useState(true)
+  const [usingCachedFallback, setUsingCachedFallback] = React.useState(false)
   const [syncTick, setSyncTick] = React.useState(0)
+  const [bootstrapVersion, setBootstrapVersion] = React.useState(0)
   const supabaseReady = isSupabaseConfigured()
 
   const stateRef = React.useRef(state)
@@ -804,6 +919,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     syncingRef.current = syncing
   }, [syncing])
 
+  const refreshAuthoritativeState = React.useCallback(async () => {
+    const remote = await loadProjectStateFromSupabase()
+    if (!remote) return null
+    return normalizeLoadedState(remote)
+  }, [])
+
   const syncNow = React.useCallback(async () => {
     if (!supabaseReady) return
     if (typeof navigator !== "undefined" && !navigator.onLine) return
@@ -818,77 +939,141 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     try {
       await saveProjectStateToSupabase(stateRef.current)
+      await persistQueuedSideEffects(stateRef.current)
+      const remote = await refreshAuthoritativeState()
       clearQueue()
-      baseDispatch({ type: "sync" })
+      if (remote) {
+        baseDispatch({ type: "hydrate", state: withSyncedRuntimeState(remote) })
+      } else {
+        baseDispatch({ type: "sync" })
+      }
     } catch (error) {
       const msg = error instanceof Error ? error.message : "שגיאה לא צפויה בסנכרון"
+      if (isDevelopment()) {
+        console.error("[Supabase syncNow] save failed", error)
+      }
       setSyncError(msg)
     } finally {
       setSyncing(false)
     }
   }, [supabaseReady])
 
+  const commitAction = React.useCallback(
+    async (action: Action) => {
+      if (!isPersistentAction(action)) {
+        baseDispatch(action)
+        return { ok: true }
+      }
+
+      const online = typeof navigator === "undefined" || navigator.onLine
+      if (!supabaseReady || stateRef.current.offline || !online) {
+        baseDispatch(action)
+        if (hydratedRef.current) {
+          enqueueOperation(action.type, toQueuedAction(action))
+          setSyncTick((x) => x + 1)
+        }
+        return { ok: true }
+      }
+
+      const nextState = reducer(stateRef.current, action)
+      setSyncing(true)
+      setSyncError(null)
+
+      try {
+        await saveProjectStateToSupabase(nextState)
+        await persistQueuedSideEffects(nextState, [
+          { id: "commit", type: action.type, at: new Date().toISOString(), action: toQueuedAction(action) },
+        ])
+        const remote = await refreshAuthoritativeState()
+        clearQueue()
+        baseDispatch({
+          type: "hydrate",
+          state: withSyncedRuntimeState(remote ?? nextState),
+        })
+        return { ok: true }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : "שגיאה לא צפויה בשמירה"
+        if (isDevelopment()) {
+          console.error("[Supabase commitAction] save failed", { action, error })
+        }
+        setSyncError(msg)
+        return { ok: false, error: msg }
+      } finally {
+        setSyncing(false)
+      }
+    },
+    [supabaseReady],
+  )
+
   const dispatch = React.useCallback(
     (action: Action) => {
       baseDispatch(action)
       if (!hydratedRef.current) return
       if (!isPersistentAction(action)) return
-      enqueueOperation(action.type)
+      enqueueOperation(action.type, toQueuedAction(action))
       setSyncTick((x) => x + 1)
     },
     [],
   )
 
+  const retryLoad = React.useCallback(() => {
+    setLoadError(null)
+    setBootstrapping(true)
+    setBootstrapVersion((v) => v + 1)
+  }, [])
+
   React.useEffect(() => {
     let mounted = true
 
     const bootstrap = async () => {
-      let localState = createSeedState()
+      const cachedState = readCachedState()
+      const hasCachedData = hasMeaningfulLocalData(cachedState)
+      const queuedOps = readQueue()
 
-      try {
-        const raw = window.localStorage.getItem(STORAGE_KEY)
-        if (raw) {
-          const parsed = JSON.parse(raw) as unknown
-          const envelope = asStateEnvelope(parsed)
-          if (envelope) {
-            localState = ensureTodayTour(stripDemoData(normalizeStateShape(envelope)))
-          }
-        }
-      } catch {
-        /* ignore corrupt stored data */
-      }
+      setLoadError(null)
+      setUsingCachedFallback(false)
 
       if (!mounted) return
-      baseDispatch({ type: "hydrate", state: localState })
+      baseDispatch({ type: "hydrate", state: cachedState })
       setHydrated(true)
 
       if (!supabaseReady || (typeof navigator !== "undefined" && !navigator.onLine)) {
+        setUsingCachedFallback(hasCachedData)
         setBootstrapping(false)
         return
       }
 
       try {
-        const remoteState = await loadProjectStateFromSupabase()
+        const remoteState = await refreshAuthoritativeState()
         if (!mounted) return
 
         if (remoteState) {
-          const hasQueuedLocalChanges = queueSize() > 0 || localState.pendingCount > 0
-          if (hasQueuedLocalChanges) {
-            await saveProjectStateToSupabase(localState)
+          let authoritativeState = remoteState
+          if (queuedOps.length > 0) {
+            const mergedState = replayPendingMutations(remoteState, queuedOps)
+            await saveProjectStateToSupabase(mergedState)
+            await persistQueuedSideEffects(mergedState, queuedOps)
             clearQueue()
-            baseDispatch({ type: "sync" })
-          } else {
-            baseDispatch({ type: "hydrate", state: ensureTodayTour(normalizeStateShape(remoteState)) })
+            authoritativeState = (await refreshAuthoritativeState()) ?? mergedState
           }
-        } else if (hasMeaningfulLocalData(localState)) {
-          await saveProjectStateToSupabase(localState)
+
+          baseDispatch({ type: "hydrate", state: withSyncedRuntimeState(authoritativeState) })
+        } else if (hasCachedData) {
+          const mergedState = replayPendingMutations(cachedState, queuedOps)
+          await saveProjectStateToSupabase(mergedState)
+          await persistQueuedSideEffects(mergedState, queuedOps)
           clearQueue()
-          baseDispatch({ type: "sync" })
+          const authoritativeState = (await refreshAuthoritativeState()) ?? mergedState
+          baseDispatch({ type: "hydrate", state: withSyncedRuntimeState(authoritativeState) })
         }
       } catch (error) {
         if (!mounted) return
         const msg = error instanceof Error ? error.message : "שגיאה בטעינת נתונים"
-        setSyncError(msg)
+        if (isDevelopment()) {
+          console.error("[Supabase bootstrap] load failed", error)
+        }
+        setLoadError(msg)
+        setUsingCachedFallback(hasCachedData)
       } finally {
         if (mounted) setBootstrapping(false)
       }
@@ -899,7 +1084,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return () => {
       mounted = false
     }
-  }, [supabaseReady])
+  }, [supabaseReady, refreshAuthoritativeState, bootstrapVersion])
 
   React.useEffect(() => {
     if (typeof window === "undefined") return
@@ -951,15 +1136,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
       void (async () => {
         try {
-          const remote = await loadProjectStateFromSupabase()
+          const remote = await refreshAuthoritativeState()
           if (!remote) return
-          const normalized = ensureTodayTour(normalizeStateShape(remote))
+          setLoadError(null)
           const localState = stateRef.current
-          if (JSON.stringify(localState) !== JSON.stringify(normalized)) {
-            baseDispatch({ type: "hydrate", state: normalized })
+          if (JSON.stringify(comparableState(localState)) !== JSON.stringify(comparableState(remote))) {
+            baseDispatch({ type: "hydrate", state: { ...remote, pendingCount: localState.pendingCount, lastSyncAt: localState.lastSyncAt } })
           }
-        } catch {
-          // Keep local state if remote refresh fails.
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : "שגיאה ברענון הנתונים"
+          if (isDevelopment()) {
+            console.error("[Supabase refresh] load failed", error)
+          }
+          setLoadError(msg)
         }
       })()
     }, 25000)
@@ -968,27 +1157,53 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [hydrated, supabaseReady, state.offline])
 
   React.useEffect(() => {
-    try {
-      const payload = { version: STORAGE_VERSION, state }
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
-    } catch {
-      /* storage full – app continues in memory */
-    }
+    writeCachedState(state)
   }, [state, hydrated])
+
+  React.useEffect(() => {
+    if (!hydrated || !syncError) return
+    toast.error("שמירה או טעינה מול Supabase נכשלה", {
+      description: humanizePersistenceError(syncError),
+    })
+  }, [hydrated, syncError])
+
+  React.useEffect(() => {
+    if (!hydrated || !loadError) return
+    toast.error("טעינת הנתונים נכשלה", {
+      description: humanizeLoadError(loadError),
+    })
+  }, [hydrated, loadError])
 
   const value = React.useMemo(
     () => ({
       state,
       hydrated,
       dispatch,
+      commitAction,
       syncNow,
       syncing,
       syncError,
+      loadError,
       supabaseReady,
       bootstrapping,
+      usingCachedFallback,
+      retryLoad,
       uid,
     }),
-    [state, hydrated, dispatch, syncNow, syncing, syncError, supabaseReady, bootstrapping],
+    [
+      state,
+      hydrated,
+      dispatch,
+      commitAction,
+      syncNow,
+      syncing,
+      syncError,
+      loadError,
+      supabaseReady,
+      bootstrapping,
+      usingCachedFallback,
+      retryLoad,
+    ],
   )
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
 }

@@ -16,9 +16,11 @@ export function ConnectionPill({
   variant?: "default" | "sidebar" | "compact"
   className?: string
 }) {
-  const { state, dispatch, hydrated, syncNow, syncing, syncError, supabaseReady } = useStore()
+  const { state, dispatch, hydrated, syncNow, syncing, syncError, loadError, supabaseReady } = useStore()
   const offline = state.offline
   const pending = state.pendingCount
+  const effectiveError = syncError ?? loadError
+  const hasSyncError = Boolean(effectiveError)
 
   async function sync() {
     await syncNow()
@@ -39,6 +41,8 @@ export function ConnectionPill({
 
   const label = offline
     ? "אין קליטה • נשמר במכשיר"
+    : hasSyncError
+      ? "שגיאת Supabase"
     : pending > 0
       ? `${pending} ממתינים`
       : supabaseReady
@@ -98,7 +102,9 @@ export function ConnectionPill({
               <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
                 {offline
                   ? "הסיור נמשך כרגיל. כל תצפית, משימה ותמונה נשמרות במכשיר ויסונכרנו כשהקליטה תחזור."
-                  : !supabaseReady
+                : hasSyncError
+                  ? effectiveError
+                    : !supabaseReady
                     ? "יש להגדיר NEXT_PUBLIC_SUPABASE_URL ו-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY כדי לשתף נתונים בין מכשירים."
                     : state.lastSyncAt
                       ? `סונכרן לאחרונה ב-${state.lastSyncAt}`
@@ -126,7 +132,7 @@ export function ConnectionPill({
             </Button>
           )}
 
-          {!offline && pending === 0 && supabaseReady && (
+          {!offline && !hasSyncError && pending === 0 && supabaseReady && (
             <div className="flex items-center gap-2 rounded-md bg-ok-soft px-3 py-2 text-xs font-medium text-ok">
               <Check className="size-3.5" />
               הכול מסונכרן

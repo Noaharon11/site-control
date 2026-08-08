@@ -13,6 +13,8 @@ import {
   FileText,
   Settings2,
   Sun,
+  RefreshCw,
+  AlertTriangle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useStore } from "@/lib/store"
@@ -44,7 +46,7 @@ function isActive(pathname: string, href: string) {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const { state, hydrated } = useStore()
+  const { state, hydrated, bootstrapping, loadError, usingCachedFallback, retryLoad } = useStore()
 
   const open = openTasks(state).length
   const overdue = overdueTasks(state).length
@@ -114,7 +116,36 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* ------------------------------------------------------------ content */}
       <div className="flex min-w-0 flex-1 flex-col pb-[env(safe-area-inset-bottom)]">
-        {children}
+        {bootstrapping ? (
+          <main className="flex min-h-[40dvh] items-center justify-center px-4 py-10 lg:px-8">
+            <div className="flex w-full max-w-md flex-col items-center gap-3 rounded-xl border border-border bg-card p-6 text-center">
+              <RefreshCw className="size-5 animate-spin text-primary" />
+              <p className="text-sm font-semibold text-foreground">טוען נתונים מ-Supabase…</p>
+              <p className="text-xs text-muted-foreground">המערכת מוודאת שהנתונים העדכניים נטענו לפני הצגה.</p>
+            </div>
+          </main>
+        ) : loadError && !usingCachedFallback ? (
+          <main className="flex min-h-[40dvh] items-center justify-center px-4 py-10 lg:px-8">
+            <div className="flex w-full max-w-md flex-col items-center gap-3 rounded-xl border border-crit/30 bg-card p-6 text-center">
+              <AlertTriangle className="size-5 text-crit" />
+              <p className="text-sm font-semibold text-foreground">לא ניתן לטעון את הנתונים</p>
+              <p className="text-xs leading-relaxed text-muted-foreground">נסה שוב. הנתונים ב-Supabase לא נטענו ולכן לא מוצג מצב ריק מטעה.</p>
+              <Button size="sm" onClick={retryLoad}>
+                <RefreshCw data-icon="inline-start" />
+                נסה שוב
+              </Button>
+            </div>
+          </main>
+        ) : (
+          <>
+            {loadError && usingCachedFallback && (
+              <div className="border-b border-warn/30 bg-warn-soft px-4 py-2 text-center text-xs font-medium text-warn-foreground lg:px-8">
+                מוצגים נתונים שמורים מקומית עד ש-Supabase יחזור להגיב. <button type="button" className="underline underline-offset-2" onClick={retryLoad}>נסה שוב</button>
+              </div>
+            )}
+            {children}
+          </>
+        )}
       </div>
 
       {/* ------------------------------------------------- mobile bottom nav */}

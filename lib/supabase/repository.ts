@@ -37,8 +37,22 @@ interface ProjectRow {
 const DEFAULT_PROJECT_EXTERNAL_ID =
   process.env.NEXT_PUBLIC_SUPABASE_PROJECT_EXTERNAL_ID?.trim() || "proj-1"
 
+function debugLog(event: string, payload?: unknown) {
+  if (process.env.NODE_ENV === "production") return
+  if (payload === undefined) {
+    console.info(`[Supabase repository] ${event}`)
+    return
+  }
+  console.info(`[Supabase repository] ${event}`, payload)
+}
+
 function toError(error: PostgrestError | null, context: string) {
   return new Error(error ? `${context}: ${error.message}` : context)
+}
+
+function isMissingRelationError(error: PostgrestError | null, relation: string) {
+  if (!error) return false
+  return new RegExp(`table 'public\\.${relation}'`, "i").test(error.message)
 }
 
 function isActiveTrue<T extends { active?: boolean }>(rows: T[]) {
@@ -225,6 +239,10 @@ async function replaceTaskAreas(projectId: string, tasks: Task[]) {
       .delete()
       .eq("project_id", projectId)
       .in("task_external_id", taskIds)
+    if (isMissingRelationError(del.error, "task_areas")) {
+      debugLog("save:skip-task-areas", "task_areas table is missing; using legacy task.area_external_id")
+      return
+    }
     if (del.error) throw toError(del.error, "Failed to clear task areas")
   }
 
@@ -232,33 +250,27 @@ async function replaceTaskAreas(projectId: string, tasks: Task[]) {
   if (rows.length === 0) return
 
   const ins = await supabase.from("task_areas").insert(rows)
+  if (isMissingRelationError(ins.error, "task_areas")) {
+    debugLog("save:skip-task-areas", "task_areas table is missing; using legacy task.area_external_id")
+    return
+  }
   if (ins.error) throw toError(ins.error, "Failed to save task areas")
 }
 
-async function reconcileDeletedTasks(projectId: string, tasks: Task[]) {
+export async function deleteTaskFromSupabase(project: ProjectState["project"], taskExternalId: string) {
   const supabase = getSupabaseClient()
   if (!supabase) return
 
-  const existing = await supabase.from("tasks").select("external_id").eq("project_id", projectId)
-  if (existing.error) throw toError(existing.error, "Failed to load existing tasks")
-
-  const keep = new Set(tasks.map((task) => task.id))
-  const stale = ((existing.data ?? []) as Array<{ external_id: string }>).filter(
-    (row) => !keep.has(row.external_id),
-  )
-
-  if (stale.length === 0) return
+  const projectRef = await ensureProject(project)
+  if (!projectRef) return
 
   const del = await supabase
     .from("tasks")
     .delete()
-    .eq("project_id", projectId)
-    .in(
-      "external_id",
-      stale.map((row) => row.external_id),
-    )
+    .eq("project_id", projectRef.id)
+    .eq("external_id", taskExternalId)
 
-  if (del.error) throw toError(del.error, "Failed to delete removed tasks")
+  if (del.error) throw toError(del.error, "Failed to delete task")
 }
 
 async function upsertRows(table: string, rows: Record<string, unknown>[], onConflict: string) {
@@ -341,6 +353,12 @@ function mapTaskHistory(
 }
 
 export async function saveProjectStateToSupabase(state: ProjectState) {
+  debugLog("save:start", {
+    projectId: state.project.id,
+    tasks: state.tasks.length,
+    areas: state.areas.length,
+    tours: state.tours.length,
+  })
   const projectRef = await ensureProject(state.project)
   if (!projectRef) return
   const projectId = projectRef.id
@@ -454,7 +472,6 @@ export async function saveProjectStateToSupabase(state: ProjectState) {
     "project_id,external_id",
   )
 
-  await reconcileDeletedTasks(projectId, state.tasks)
   await replaceTaskEvents(projectId, state.tasks)
   await replaceTaskAreas(projectId, state.tasks)
 
@@ -579,6 +596,12 @@ export async function saveProjectStateToSupabase(state: ProjectState) {
     })),
     "project_id,external_id",
   )
+
+  debugLog("save:success", {
+    projectExternalId: projectRef.external_id,
+    projectId,
+    tasks: state.tasks.length,
+  })
 }
 
 export async function loadProjectStateFromSupabase(): Promise<ProjectState | null> {
@@ -587,6 +610,7 @@ export async function loadProjectStateFromSupabase(): Promise<ProjectState | nul
 
   const projectRef = await loadProjectReference()
   if (!projectRef) return null
+  debugLog("load:projectRef", projectRef)
 
   const projectRes = await supabase.from("projects").select("*").eq("id", projectRef.id).maybeSingle()
 
@@ -650,7 +674,9 @@ export async function loadProjectStateFromSupabase(): Promise<ProjectState | nul
     activityRes,
     dayTargetRes,
   ]
-  const firstError = all.find((x) => x.error)?.error ?? null
+  const firstError =
+    all.find((x) => x.error && !(x === taskAreasRes && isMissingRelationError(x.error, "task_areas")))
+      ?.error ?? null
   if (firstError) throw toError(firstError, "Failed to load project state")
 
   const visitsByTour = mapVisitRows((visitRes.data ?? []) as Array<Record<string, unknown>>)
@@ -696,7 +722,11 @@ export async function loadProjectStateFromSupabase(): Promise<ProjectState | nul
   )
 
   const taskAreaMap = new Map<string, string[]>()
-  ;((taskAreasRes.data ?? []) as Array<Record<string, unknown>>).forEach((row) => {
+  if (isMissingRelationError(taskAreasRes.error, "task_areas")) {
+    debugLog("load:skip-task-areas", "task_areas table is missing; using legacy task.area_external_id")
+  }
+
+  ;((isMissingRelationError(taskAreasRes.error, "task_areas") ? [] : taskAreasRes.data ?? []) as Array<Record<string, unknown>>).forEach((row) => {
     const taskId = String(row.task_external_id)
     const areaId = String(row.area_external_id)
     const list = taskAreaMap.get(taskId) ?? []
@@ -889,6 +919,13 @@ export async function loadProjectStateFromSupabase(): Promise<ProjectState | nul
       topPriorities: [],
     })
   }
+
+  debugLog("load:success", {
+    projectExternalId: state.project.id,
+    tasks: state.tasks.length,
+    areas: state.areas.length,
+    tours: state.tours.length,
+  })
 
   return state
 }
