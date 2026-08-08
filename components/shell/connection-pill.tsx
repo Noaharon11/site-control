@@ -16,27 +16,34 @@ export function ConnectionPill({
   variant?: "default" | "sidebar" | "compact"
   className?: string
 }) {
-  const { state, dispatch, hydrated } = useStore()
-  const [syncing, setSyncing] = React.useState(false)
+  const { state, dispatch, hydrated, syncNow, syncing, syncError, supabaseReady } = useStore()
   const offline = state.offline
   const pending = state.pendingCount
 
-  function sync() {
-    setSyncing(true)
-    window.setTimeout(() => {
-      dispatch({ type: "sync" })
-      setSyncing(false)
+  async function sync() {
+    await syncNow()
+    if (syncError) {
+      toast.error("הסנכרון נכשל", { description: syncError })
+      return
+    }
+    if (pending > 0) {
       toast.success("כל נתוני הסיור סונכרנו בהצלחה", {
         description: `${pending} עדכונים הועלו לשרת`,
       })
-    }, 1100)
+    }
   }
 
   if (!hydrated) {
     return <div className={cn("h-8 w-28 rounded-full bg-muted/60", className)} />
   }
 
-  const label = offline ? "אין קליטה • נשמר במכשיר" : pending > 0 ? `${pending} ממתינים` : "מסונכרן"
+  const label = offline
+    ? "אין קליטה • נשמר במכשיר"
+    : pending > 0
+      ? `${pending} ממתינים`
+      : supabaseReady
+        ? "מסונכרן"
+        : "ללא Supabase"
 
   return (
     <Popover>
@@ -86,14 +93,16 @@ export function ConnectionPill({
             </div>
             <div className="min-w-0">
               <p className="text-sm font-semibold text-foreground">
-                {offline ? "עובד ללא קליטה" : "מחובר ומסונכרן"}
+                {offline ? "עובד ללא קליטה" : supabaseReady ? "מחובר ומסונכרן" : "Supabase לא מוגדר"}
               </p>
               <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
                 {offline
                   ? "הסיור נמשך כרגיל. כל תצפית, משימה ותמונה נשמרות במכשיר ויסונכרנו כשהקליטה תחזור."
-                  : state.lastSyncAt
-                    ? `סונכרן לאחרונה ב-${state.lastSyncAt}`
-                    : "אין עדכונים ממתינים"}
+                  : !supabaseReady
+                    ? "יש להגדיר NEXT_PUBLIC_SUPABASE_URL ו-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY כדי לשתף נתונים בין מכשירים."
+                    : state.lastSyncAt
+                      ? `סונכרן לאחרונה ב-${state.lastSyncAt}`
+                      : "אין עדכונים ממתינים"}
               </p>
             </div>
           </div>
@@ -106,7 +115,7 @@ export function ConnectionPill({
             </div>
           )}
 
-          {!offline && pending > 0 && (
+          {!offline && pending > 0 && supabaseReady && (
             <Button size="sm" onClick={sync} disabled={syncing} className="w-full">
               {syncing ? (
                 <RefreshCw data-icon="inline-start" className="animate-spin" />
@@ -117,10 +126,16 @@ export function ConnectionPill({
             </Button>
           )}
 
-          {!offline && pending === 0 && (
+          {!offline && pending === 0 && supabaseReady && (
             <div className="flex items-center gap-2 rounded-md bg-ok-soft px-3 py-2 text-xs font-medium text-ok">
               <Check className="size-3.5" />
               הכול מסונכרן
+            </div>
+          )}
+
+          {!offline && syncError && (
+            <div className="rounded-md border border-crit/40 bg-crit-soft/50 px-3 py-2 text-xs text-crit">
+              הסנכרון האחרון נכשל: {syncError}
             </div>
           )}
 

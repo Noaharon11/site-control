@@ -3,6 +3,13 @@
 import * as React from "react"
 import { createSeedState, emptyVisit } from "./seed"
 import { dayOffset, nowTime, today } from "./dates"
+import { isSupabaseConfigured } from "./supabase/client"
+import { clearQueue, enqueueOperation, queueSize } from "./supabase/queue"
+import {
+  hasMeaningfulLocalData,
+  loadProjectStateFromSupabase,
+  saveProjectStateToSupabase,
+} from "./supabase/repository"
 import type {
   ActivityKind,
   ActivityLog,
@@ -22,7 +29,7 @@ import type {
 } from "./types"
 
 const STORAGE_KEY = "rakafot.pm.v1"
-const STORAGE_VERSION = 2
+const STORAGE_VERSION = 3
 
 const DEMO_PERSON_IDS = new Set([
   "me",
@@ -89,7 +96,22 @@ type Action =
   | { type: "log"; kind: ActivityKind; text: string; areaId?: string | null; refId?: string | null }
 
 function uid(prefix: string) {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}-${crypto.randomUUID()}`
+  }
   return `${prefix}-${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-3)}`
+}
+
+function isPersistentAction(action: Action) {
+  switch (action.type) {
+    case "hydrate":
+    case "toggleOffline":
+    case "sync":
+    case "log":
+      return false
+    default:
+      return true
+  }
 }
 
 function log(
@@ -654,6 +676,11 @@ interface StoreValue {
   state: ProjectState
   hydrated: boolean
   dispatch: React.Dispatch<Action>
+  syncNow: () => Promise<void>
+  syncing: boolean
+  syncError: string | null
+  supabaseReady: boolean
+  bootstrapping: boolean
   /** helpers used across screens */
   uid: (prefix: string) => string
 }
@@ -661,36 +688,216 @@ interface StoreValue {
 const StoreContext = React.createContext<StoreValue | null>(null)
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const [state, dispatch] = React.useReducer(reducer, null, createSeedState)
+  const [state, baseDispatch] = React.useReducer(reducer, null, createSeedState)
   const [hydrated, setHydrated] = React.useState(false)
+  const [syncing, setSyncing] = React.useState(false)
+  const [syncError, setSyncError] = React.useState<string | null>(null)
+  const [bootstrapping, setBootstrapping] = React.useState(true)
+  const [syncTick, setSyncTick] = React.useState(0)
+  const supabaseReady = isSupabaseConfigured()
+
+  const stateRef = React.useRef(state)
+  const hydratedRef = React.useRef(hydrated)
+  const syncingRef = React.useRef(syncing)
 
   React.useEffect(() => {
+    stateRef.current = state
+  }, [state])
+
+  React.useEffect(() => {
+    hydratedRef.current = hydrated
+  }, [hydrated])
+
+  React.useEffect(() => {
+    syncingRef.current = syncing
+  }, [syncing])
+
+  const syncNow = React.useCallback(async () => {
+    if (!supabaseReady) return
+    if (typeof navigator !== "undefined" && !navigator.onLine) return
+    if (stateRef.current.offline) return
+    if (syncingRef.current) return
+
+    const queued = queueSize()
+    if (queued === 0 && stateRef.current.pendingCount === 0) return
+
+    setSyncing(true)
+    setSyncError(null)
+
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw) as unknown
-        const envelope = asStateEnvelope(parsed)
-        if (envelope) {
-          const next = ensureTodayTour(stripDemoData(normalizeStateShape(envelope)))
-          dispatch({ type: "hydrate", state: next })
-        }
-      }
-    } catch {
-      /* ignore corrupt stored data */
+      await saveProjectStateToSupabase(stateRef.current)
+      clearQueue()
+      baseDispatch({ type: "sync" })
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "שגיאה לא צפויה בסנכרון"
+      setSyncError(msg)
+    } finally {
+      setSyncing(false)
     }
-    setHydrated(true)
+  }, [supabaseReady])
+
+  const dispatch = React.useCallback(
+    (action: Action) => {
+      baseDispatch(action)
+      if (!hydratedRef.current) return
+      if (!isPersistentAction(action)) return
+      enqueueOperation(action.type)
+      setSyncTick((x) => x + 1)
+    },
+    [],
+  )
+
+  React.useEffect(() => {
+    let mounted = true
+
+    const bootstrap = async () => {
+      let localState = createSeedState()
+
+      try {
+        const raw = window.localStorage.getItem(STORAGE_KEY)
+        if (raw) {
+          const parsed = JSON.parse(raw) as unknown
+          const envelope = asStateEnvelope(parsed)
+          if (envelope) {
+            localState = ensureTodayTour(stripDemoData(normalizeStateShape(envelope)))
+          }
+        }
+      } catch {
+        /* ignore corrupt stored data */
+      }
+
+      if (!mounted) return
+      baseDispatch({ type: "hydrate", state: localState })
+      setHydrated(true)
+
+      if (!supabaseReady || (typeof navigator !== "undefined" && !navigator.onLine)) {
+        setBootstrapping(false)
+        return
+      }
+
+      try {
+        const remoteState = await loadProjectStateFromSupabase()
+        if (!mounted) return
+
+        if (remoteState) {
+          const hasQueuedLocalChanges = queueSize() > 0 || localState.pendingCount > 0
+          if (hasQueuedLocalChanges) {
+            await saveProjectStateToSupabase(localState)
+            clearQueue()
+            baseDispatch({ type: "sync" })
+          } else {
+            baseDispatch({ type: "hydrate", state: ensureTodayTour(normalizeStateShape(remoteState)) })
+          }
+        } else if (hasMeaningfulLocalData(localState)) {
+          await saveProjectStateToSupabase(localState)
+          clearQueue()
+          baseDispatch({ type: "sync" })
+        }
+      } catch (error) {
+        if (!mounted) return
+        const msg = error instanceof Error ? error.message : "שגיאה בטעינת נתונים"
+        setSyncError(msg)
+      } finally {
+        if (mounted) setBootstrapping(false)
+      }
+    }
+
+    void bootstrap()
+
+    return () => {
+      mounted = false
+    }
+  }, [supabaseReady])
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const onOnline = () => {
+      if (stateRef.current.offline) {
+        baseDispatch({ type: "toggleOffline", value: false })
+      }
+      setSyncTick((x) => x + 1)
+    }
+
+    const onOffline = () => {
+      if (!stateRef.current.offline) {
+        baseDispatch({ type: "toggleOffline", value: true })
+      }
+    }
+
+    window.addEventListener("online", onOnline)
+    window.addEventListener("offline", onOffline)
+
+    return () => {
+      window.removeEventListener("online", onOnline)
+      window.removeEventListener("offline", onOffline)
+    }
   }, [])
 
   React.useEffect(() => {
     if (!hydrated) return
+    if (!supabaseReady) return
+    if (state.offline) return
+    if (typeof navigator !== "undefined" && !navigator.onLine) return
+    if (queueSize() === 0) return
+
+    const timer = window.setTimeout(() => {
+      void syncNow()
+    }, 300)
+
+    return () => window.clearTimeout(timer)
+  }, [hydrated, state.offline, supabaseReady, syncNow, syncTick])
+
+  React.useEffect(() => {
+    if (!hydrated) return
+    if (!supabaseReady) return
+    if (state.offline) return
+
+    const timer = window.setInterval(() => {
+      if (queueSize() > 0 || syncingRef.current) return
+      if (typeof navigator !== "undefined" && !navigator.onLine) return
+
+      void (async () => {
+        try {
+          const remote = await loadProjectStateFromSupabase()
+          if (!remote) return
+          const normalized = ensureTodayTour(normalizeStateShape(remote))
+          const localState = stateRef.current
+          if (JSON.stringify(localState) !== JSON.stringify(normalized)) {
+            baseDispatch({ type: "hydrate", state: normalized })
+          }
+        } catch {
+          // Keep local state if remote refresh fails.
+        }
+      })()
+    }, 25000)
+
+    return () => window.clearInterval(timer)
+  }, [hydrated, supabaseReady, state.offline])
+
+  React.useEffect(() => {
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: STORAGE_VERSION, state }))
+      const payload = { version: STORAGE_VERSION, state }
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
     } catch {
       /* storage full – app continues in memory */
     }
   }, [state, hydrated])
 
-  const value = React.useMemo(() => ({ state, hydrated, dispatch, uid }), [state, hydrated])
+  const value = React.useMemo(
+    () => ({
+      state,
+      hydrated,
+      dispatch,
+      syncNow,
+      syncing,
+      syncError,
+      supabaseReady,
+      bootstrapping,
+      uid,
+    }),
+    [state, hydrated, dispatch, syncNow, syncing, syncError, supabaseReady, bootstrapping],
+  )
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
 }
 
