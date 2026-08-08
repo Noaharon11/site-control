@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { AreaMultiSelect } from "@/components/tasks/area-multi-select"
 import {
   Select,
   SelectContent,
@@ -33,6 +34,7 @@ export function NewTaskSheet({
   open,
   onOpenChange,
   defaultAreaId = null,
+  defaultAreaIds,
   defaultTitle = "",
   defaultAssigneeId,
   source = "ידני",
@@ -43,6 +45,7 @@ export function NewTaskSheet({
   open: boolean
   onOpenChange: (v: boolean) => void
   defaultAreaId?: string | null
+  defaultAreaIds?: string[]
   defaultTitle?: string
   defaultAssigneeId?: string
   source?: string
@@ -55,7 +58,9 @@ export function NewTaskSheet({
 
   const [title, setTitle] = React.useState(defaultTitle)
   const [description, setDescription] = React.useState("")
-  const [areaId, setAreaId] = React.useState<string>(defaultAreaId ?? "none")
+  const [areaIds, setAreaIds] = React.useState<string[]>(
+    defaultAreaIds ?? (defaultAreaId ? [defaultAreaId] : []),
+  )
   const [assigneeId, setAssigneeId] = React.useState(defaultAssigneeId ?? "me")
   const [priority, setPriority] = React.useState<Priority>("normal")
   const [dueDays, setDueDays] = React.useState(1)
@@ -64,21 +69,23 @@ export function NewTaskSheet({
     if (!open) return
     setTitle(defaultTitle)
     setDescription("")
-    setAreaId(defaultAreaId ?? "none")
+    setAreaIds(defaultAreaIds ?? (defaultAreaId ? [defaultAreaId] : []))
     setAssigneeId(defaultAssigneeId ?? "me")
     setPriority("normal")
     setDueDays(1)
-  }, [open, defaultTitle, defaultAreaId, defaultAssigneeId])
+  }, [open, defaultTitle, defaultAreaId, defaultAreaIds, defaultAssigneeId])
 
   function save() {
     if (!title.trim()) return
     const person = state.people.find((p) => p.id === assigneeId)
     const group: PersonGroup = assigneeId === "me" ? "me" : person?.group ?? "me"
+    const normalizedAreaIds = [...new Set(areaIds.filter(Boolean))]
     const task: Task = {
       id: uid("tk"),
       title: title.trim(),
       description: description.trim() || undefined,
-      areaId: areaId === "none" ? null : areaId,
+      areaIds: normalizedAreaIds,
+      areaId: normalizedAreaIds[0] ?? null,
       assigneeId,
       assigneeGroup: group,
       priority,
@@ -100,10 +107,16 @@ export function NewTaskSheet({
     dispatch({ type: "addTask", task })
     onCreated?.(task)
     onOpenChange(false)
+    const areaSummary =
+      normalizedAreaIds.length === 0
+        ? "ללא אזור"
+        : normalizedAreaIds.length === 1
+          ? areaName(state, normalizedAreaIds[0])
+          : `${normalizedAreaIds.length} אזורים`
     toast.success("משימה נוצרה", {
       description: state.offline
         ? "נשמר במכשיר – יסונכרן כשהקליטה תחזור"
-        : `${task.areaId ? areaName(state, task.areaId) + " • " : ""}${assigneeId === "me" ? "אני" : person?.name ?? "לא הוקצה"}`,
+        : `${areaSummary} • ${assigneeId === "me" ? "אני" : person?.name ?? "לא הוקצה"}`,
     })
   }
 
@@ -113,10 +126,10 @@ export function NewTaskSheet({
       onOpenChange={onOpenChange}
       title="משימה חדשה"
       description={
-        defaultAreaId ? (
+        (defaultAreaIds?.length || defaultAreaId) ? (
           <span className="inline-flex items-center gap-1 font-medium text-info">
             <MapPin className="size-3" />
-            האזור מולא אוטומטית: {areaName(state, defaultAreaId)}
+            האזור הנוכחי מולא אוטומטית. אפשר להוסיף או להסיר אזורים.
           </span>
         ) : (
           "כל משימה נשמרת עם אזור, אחראי ומקור – כדי שאפשר יהיה לעקוב אחריה"
@@ -167,22 +180,13 @@ export function NewTaskSheet({
         </Field>
 
         <Field>
-          <FieldLabel>אזור</FieldLabel>
-          <Select value={areaId} onValueChange={(v) => setAreaId(v as string)}>
-            <SelectTrigger className="h-10 w-full">
-              <SelectValue className="text-start" />
-            </SelectTrigger>
-            <SelectContent className="max-h-72">
-              <SelectGroup>
-                <SelectItem value="none">ללא אזור</SelectItem>
-                {state.areas.filter((a) => a.active !== false).map((a) => (
-                  <SelectItem key={a.id} value={a.id}>
-                    {a.name}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+          <FieldLabel>אזורים</FieldLabel>
+          <AreaMultiSelect
+            areas={state.areas.filter((a) => a.active !== false)}
+            value={areaIds}
+            onChange={setAreaIds}
+            placeholder="בחר אזור אחד או יותר"
+          />
         </Field>
 
         <Field>

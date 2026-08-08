@@ -148,6 +148,26 @@ function bump(state: ProjectState, n = 1) {
   return state.offline ? state.pendingCount + n : state.pendingCount
 }
 
+function taskAreaIds(task: Task) {
+  const ids = (task.areaIds ?? []).filter(Boolean)
+  if (ids.length > 0) return [...new Set(ids)]
+  return task.areaId ? [task.areaId] : []
+}
+
+function syncTourTaskLinks(tour: Tour, taskId: string, areaIds: string[]) {
+  const wanted = new Set(areaIds)
+  const nextVisits: Tour["visits"] = {}
+
+  Object.entries(tour.visits).forEach(([areaId, visit]) => {
+    const withoutTask = (visit.taskIds ?? []).filter((id) => id !== taskId)
+    nextVisits[areaId] = wanted.has(areaId)
+      ? { ...visit, taskIds: [...withoutTask, taskId] }
+      : { ...visit, taskIds: withoutTask }
+  })
+
+  return { ...tour, visits: nextVisits }
+}
+
 function reducer(state: ProjectState, action: Action): ProjectState {
   switch (action.type) {
     case "hydrate":
@@ -308,23 +328,20 @@ function reducer(state: ProjectState, action: Action): ProjectState {
     }
 
     case "addTask": {
-      const task = { ...action.task, ...pending(state) }
-      const tours = task.areaId
-        ? withTour(state, (t) => {
-            const v = t.visits[task.areaId as string]
-            if (!v) return t
-            return {
-              ...t,
-              visits: { ...t.visits, [task.areaId as string]: { ...v, taskIds: [...v.taskIds, task.id] } },
-            }
-          })
-        : state.tours
+      const normalizedAreaIds = taskAreaIds(action.task)
+      const task = {
+        ...action.task,
+        areaIds: normalizedAreaIds,
+        areaId: normalizedAreaIds[0] ?? null,
+        ...pending(state),
+      }
+      const tours = withTour(state, (tour) => syncTourTaskLinks(tour, task.id, normalizedAreaIds))
       return {
         ...state,
         tasks: [task, ...state.tasks],
         tours,
         pendingCount: bump(state),
-        activity: log(state, "task_created", `משימה חדשה: ${task.title}`, task.areaId, task.id),
+        activity: log(state, "task_created", `משימה חדשה: ${task.title}`, task.areaId ?? null, task.id),
       }
     }
 
@@ -332,6 +349,19 @@ function reducer(state: ProjectState, action: Action): ProjectState {
       const prev = state.tasks.find((t) => t.id === action.id)
       if (!prev) return state
       const patch = { ...action.patch }
+      const requestedAreaIds = patch.areaIds
+        ? [...new Set(patch.areaIds.filter(Boolean))]
+        : patch.areaId !== undefined
+          ? patch.areaId
+            ? [patch.areaId]
+            : []
+          : null
+
+      if (requestedAreaIds) {
+        patch.areaIds = requestedAreaIds
+        patch.areaId = requestedAreaIds[0] ?? null
+      }
+
       const history = [...prev.history]
       if (action.note) history.push({ date: today(), time: nowTime(), text: action.note })
       if (patch.status && patch.status !== prev.status) {
@@ -346,16 +376,28 @@ function reducer(state: ProjectState, action: Action): ProjectState {
         if (!action.note) history.push({ date: today(), time: nowTime(), text: `סטטוס עודכן ל"${labels[patch.status]}"` })
         if (patch.status === "done") patch.completedAt = today()
       }
-      const next = { ...prev, ...patch, history, ...pending(state) }
+      const next = {
+        ...prev,
+        ...patch,
+        areaIds: patch.areaIds ?? prev.areaIds ?? taskAreaIds(prev),
+        areaId: (patch.areaIds ?? prev.areaIds ?? taskAreaIds(prev))[0] ?? null,
+        history,
+        ...pending(state),
+      }
+
+      const nextAreaIds = taskAreaIds(next)
+      const tours = withTour(state, (tour) => syncTourTaskLinks(tour, next.id, nextAreaIds))
+
       return {
         ...state,
         tasks: state.tasks.map((t) => (t.id === action.id ? next : t)),
+        tours,
         pendingCount: bump(state),
         activity: log(
           state,
           "task_status",
           patch.status === "done" ? `הושלם: ${prev.title}` : `עודכן: ${prev.title}`,
-          prev.areaId,
+          next.areaId,
           prev.id,
         ),
       }
@@ -512,7 +554,14 @@ function normalizeStateShape(loaded: ProjectState): ProjectState {
     areas: (base.areas ?? seed.areas).map((a) => ({ active: true, ...a })),
     people: (base.people ?? []).map((p) => ({ active: true, ...p })),
     users: (base.users ?? []).map((u) => ({ active: true, ...u })),
-    tasks: base.tasks ?? [],
+    tasks: (base.tasks ?? []).map((task) => {
+      const areaIds = taskAreaIds(task)
+      return {
+        ...task,
+        areaIds,
+        areaId: areaIds[0] ?? null,
+      }
+    }),
     observations: base.observations ?? [],
     blockers: base.blockers ?? [],
     defects: base.defects ?? [],

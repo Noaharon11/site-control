@@ -1,67 +1,9 @@
 import { dayOffset, today } from "./dates"
 import type {
-  Area,
   AreaVisit,
   ProjectState,
   Tour,
 } from "./types"
-
-/* -------------------------------------------------------------- areas ---- */
-
-function buildAreas(): Area[] {
-  const areas: Area[] = []
-  let order = 1
-
-  for (const n of [3, 2, 1]) {
-    areas.push({
-      id: `b${n}`,
-      name: `מרתף ${n}`,
-      zone: "basement",
-      level: -n,
-      wing: null,
-      routeOrder: order++,
-      active: true,
-    })
-  }
-
-  areas.push(
-    { id: "g-e", name: "קומת קרקע - מזרח", zone: "ground", level: 0, wing: "east", routeOrder: order++, active: true },
-    { id: "g-w", name: "קומת קרקע - מערב", zone: "ground", level: 0, wing: "west", routeOrder: order++, active: true },
-  )
-
-  for (let f = 1; f <= 7; f++) {
-    areas.push({
-      id: `f${f}-e`,
-      name: `קומה ${f} - מזרח`,
-      zone: "floor",
-      level: f,
-      wing: "east",
-      routeOrder: order++,
-      active: true,
-    })
-  }
-
-  areas.push({ id: "roof", name: "גג", zone: "roof", level: 8, wing: null, routeOrder: order++, active: true })
-
-  for (let f = 7; f >= 1; f--) {
-    areas.push({
-      id: `f${f}-w`,
-      name: `קומה ${f} - מערב`,
-      zone: "floor",
-      level: f,
-      wing: "west",
-      routeOrder: order++,
-      active: true,
-    })
-  }
-
-  areas.push(
-    { id: "facade", name: "חזיתות", zone: "facade", level: 9, wing: null, routeOrder: order++, active: true },
-    { id: "ext", name: "פיתוח חוץ", zone: "external", level: 9, wing: null, routeOrder: order++, active: true },
-  )
-
-  return areas
-}
 
 /* -------------------------------------------------------------- tours ---- */
 
@@ -100,8 +42,8 @@ function createTodayTour(areaIds: string[]): Tour {
 /* -------------------------------------------------------- initial state -- */
 
 export function createSeedState(): ProjectState {
-  const areas = buildAreas()
-  const tourRoute = areas.map((a) => a.id)
+  const areas: ProjectState["areas"] = []
+  const tourRoute: string[] = []
 
   return {
     project: {

@@ -111,6 +111,22 @@ function flattenTaskEvents(projectId: string, tasks: Task[]) {
   )
 }
 
+function taskAreaIds(task: Task) {
+  const ids = (task.areaIds ?? []).filter(Boolean)
+  if (ids.length > 0) return [...new Set(ids)]
+  return task.areaId ? [task.areaId] : []
+}
+
+function flattenTaskAreas(projectId: string, tasks: Task[]) {
+  return tasks.flatMap((task) =>
+    taskAreaIds(task).map((areaId) => ({
+      project_id: projectId,
+      task_external_id: task.id,
+      area_external_id: areaId,
+    })),
+  )
+}
+
 async function ensureProject(project: ProjectState["project"]) {
   const supabase = getSupabaseClient()
   if (!supabase) return null
@@ -171,6 +187,27 @@ async function replaceTaskEvents(projectId: string, tasks: Task[]) {
 
   const ins = await supabase.from("task_events").insert(rows)
   if (ins.error) throw toError(ins.error, "Failed to save task events")
+}
+
+async function replaceTaskAreas(projectId: string, tasks: Task[]) {
+  const supabase = getSupabaseClient()
+  if (!supabase) return
+
+  const taskIds = tasks.map((task) => task.id)
+  if (taskIds.length > 0) {
+    const del = await supabase
+      .from("task_areas")
+      .delete()
+      .eq("project_id", projectId)
+      .in("task_external_id", taskIds)
+    if (del.error) throw toError(del.error, "Failed to clear task areas")
+  }
+
+  const rows = flattenTaskAreas(projectId, tasks)
+  if (rows.length === 0) return
+
+  const ins = await supabase.from("task_areas").insert(rows)
+  if (ins.error) throw toError(ins.error, "Failed to save task areas")
 }
 
 async function upsertRows(table: string, rows: Record<string, unknown>[], onConflict: string) {
@@ -346,7 +383,7 @@ export async function saveProjectStateToSupabase(state: ProjectState) {
       external_id: task.id,
       title: task.title,
       description: task.description ?? null,
-      area_external_id: task.areaId,
+      area_external_id: taskAreaIds(task)[0] ?? null,
       assignee_external_id: task.assigneeId,
       assignee_group: task.assigneeGroup,
       priority: task.priority,
@@ -367,6 +404,7 @@ export async function saveProjectStateToSupabase(state: ProjectState) {
   )
 
   await replaceTaskEvents(projectId, state.tasks)
+  await replaceTaskAreas(projectId, state.tasks)
 
   await upsertRows(
     "blockers",
@@ -517,6 +555,7 @@ export async function loadProjectStateFromSupabase(): Promise<ProjectState | nul
     observationRes,
     taskRes,
     taskEventRes,
+    taskAreasRes,
     blockerRes,
     defectRes,
     decisionRes,
@@ -533,6 +572,7 @@ export async function loadProjectStateFromSupabase(): Promise<ProjectState | nul
     supabase.from("observations").select("*").eq("project_id", projectId),
     supabase.from("tasks").select("*").eq("project_id", projectId),
     supabase.from("task_events").select("*").eq("project_id", projectId).order("idx", { ascending: true }),
+    supabase.from("task_areas").select("*").eq("project_id", projectId),
     supabase.from("blockers").select("*").eq("project_id", projectId),
     supabase.from("defects").select("*").eq("project_id", projectId),
     supabase.from("decisions").select("*").eq("project_id", projectId),
@@ -551,6 +591,7 @@ export async function loadProjectStateFromSupabase(): Promise<ProjectState | nul
     observationRes,
     taskRes,
     taskEventRes,
+    taskAreasRes,
     blockerRes,
     defectRes,
     decisionRes,
@@ -579,6 +620,7 @@ export async function loadProjectStateFromSupabase(): Promise<ProjectState | nul
     title: String(task.title),
     description: (task.description as string | null) ?? undefined,
     areaId: (task.area_external_id as string | null) ?? null,
+    areaIds: [],
     assigneeId: String(task.assignee_external_id),
     assigneeGroup: task.assignee_group as Task["assigneeGroup"],
     priority: task.priority as Task["priority"],
@@ -601,6 +643,25 @@ export async function loadProjectStateFromSupabase(): Promise<ProjectState | nul
     tasksWithoutHistory,
     (taskEventRes.data ?? []) as Array<{ task_external_id: string; idx: number; date: string; time: string | null; text: string }>,
   )
+
+  const taskAreaMap = new Map<string, string[]>()
+  ;((taskAreasRes.data ?? []) as Array<Record<string, unknown>>).forEach((row) => {
+    const taskId = String(row.task_external_id)
+    const areaId = String(row.area_external_id)
+    const list = taskAreaMap.get(taskId) ?? []
+    if (!list.includes(areaId)) list.push(areaId)
+    taskAreaMap.set(taskId, list)
+  })
+
+  const normalizedTasks = tasks.map((task) => {
+    const ids = taskAreaMap.get(task.id)
+    const areaIds = ids && ids.length > 0 ? ids : task.areaId ? [task.areaId] : []
+    return {
+      ...task,
+      areaIds,
+      areaId: areaIds[0] ?? null,
+    }
+  })
 
   const state: ProjectState = {
     project: mapProjectRowToState(project),
@@ -646,7 +707,7 @@ export async function loadProjectStateFromSupabase(): Promise<ProjectState | nul
         }),
       ),
     ),
-    tasks,
+    tasks: normalizedTasks,
     observations: ((observationRes.data ?? []) as Array<Record<string, unknown>>).map(
       (row): Observation => ({
         id: String(row.external_id),

@@ -61,8 +61,29 @@ export function areaName(s: ProjectState, id: string | null | undefined) {
   return areaById(s, id)?.name ?? "ללא אזור"
 }
 
+export function taskAreaIds(task: Task) {
+  const ids = (task.areaIds ?? []).filter(Boolean)
+  if (ids.length > 0) return [...new Set(ids)]
+  return task.areaId ? [task.areaId] : []
+}
+
+export function taskPrimaryAreaId(task: Task) {
+  return taskAreaIds(task)[0] ?? null
+}
+
+export function taskAreaNames(s: ProjectState, task: Task) {
+  return taskAreaIds(task).map((id) => areaName(s, id))
+}
+
+export function taskAreaSummary(s: ProjectState, task: Task) {
+  const names = taskAreaNames(s, task)
+  if (names.length === 0) return "ללא שיוך לאזור"
+  if (names.length <= 3) return names.join(" · ")
+  return `${names.length} אזורים`
+}
+
 export function tasksInArea(s: ProjectState, areaId: string) {
-  return s.tasks.filter((t) => t.areaId === areaId)
+  return s.tasks.filter((t) => taskAreaIds(t).includes(areaId))
 }
 
 export function openTasksInArea(s: ProjectState, areaId: string) {
@@ -145,7 +166,7 @@ export function contractorSummary(s: ProjectState, personId: string) {
   const commitments = s.decisions.filter(
     (d) => d.contractorId === personId && d.dueDate && diffDays(d.dueDate, today()) >= -7,
   )
-  const areas = [...new Set(open.map((t) => t.areaId).filter(Boolean))] as string[]
+  const areas = [...new Set(open.flatMap((t) => taskAreaIds(t)))]
   const lastDecision = s.decisions
     .filter((d) => d.contractorId === personId)
     .sort((a, b) => (a.date < b.date ? 1 : -1))[0]
@@ -252,7 +273,7 @@ export function recommendations(s: ProjectState) {
     recs.push({
       id: `rec-${t.id}`,
       text: t.title,
-      detail: `${areaName(s, t.areaId)} • ${t.priority === "critical" ? "קריטי" : "גבוה"}`,
+      detail: `${taskAreaSummary(s, t)} • ${t.priority === "critical" ? "קריטי" : "גבוה"}`,
       href: `/tasks?task=${t.id}`,
     }),
   )
@@ -263,7 +284,7 @@ export function recommendations(s: ProjectState) {
     recs.push({
       id: `rec-od-${t.id}`,
       text: `להתקשר ל${personName(s, t.assigneeId)} בנוגע ל"${t.title}"`,
-      detail: `באיחור ${Math.abs(diffDays(t.dueDate!, today()))} ימים • ${areaName(s, t.areaId)}`,
+      detail: `באיחור ${Math.abs(diffDays(t.dueDate!, today()))} ימים • ${taskAreaSummary(s, t)}`,
       href: `/tasks?task=${t.id}`,
     }),
   )
@@ -301,7 +322,7 @@ export function suggestedPriorities(s: ProjectState) {
       items.push({
         id: `sp-${t.id}`,
         text: t.title,
-        reason: `${areaName(s, t.areaId)} • קריטי • פתוח ${daysOpen(t.createdAt)} ימים`,
+        reason: `${taskAreaSummary(s, t)} • קריטי • פתוח ${daysOpen(t.createdAt)} ימים`,
         taskId: t.id,
       }),
     )
@@ -312,7 +333,7 @@ export function suggestedPriorities(s: ProjectState) {
       items.push({
         id: `sp-od-${t.id}`,
         text: t.title,
-        reason: `${areaName(s, t.areaId)} • באיחור`,
+        reason: `${taskAreaSummary(s, t)} • באיחור`,
         taskId: t.id,
       }),
     )
@@ -366,5 +387,7 @@ export function carriedOverTasks(s: ProjectState) {
   const tour = currentTour(s)
   if (!tour) return []
   const route = new Set(tour.routeAreaIds)
-  return openTasks(s).filter((t) => t.areaId && route.has(t.areaId) && diffDays(today(), t.createdAt) >= 1)
+  return openTasks(s).filter(
+    (t) => taskAreaIds(t).some((areaId) => route.has(areaId)) && diffDays(today(), t.createdAt) >= 1,
+  )
 }

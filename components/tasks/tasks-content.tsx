@@ -6,7 +6,7 @@ import { AlertTriangle, Clock, Inbox, ListFilter, Plus, Search, User, X } from "
 import { cn } from "@/lib/utils"
 import { useStore } from "@/lib/store"
 import type { Task } from "@/lib/types"
-import { areaName, isOpen, personName } from "@/lib/selectors"
+import { areaName, isOpen, personName, taskAreaIds, taskAreaNames } from "@/lib/selectors"
 import { today } from "@/lib/dates"
 import { PageBody, PageHeader } from "@/components/common/page-header"
 import { SectionTitle } from "@/components/common/chips"
@@ -64,6 +64,7 @@ export function TasksContent() {
   const { state, hydrated } = useStore()
   const params = useSearchParams()
   const deepLink = params.get("task")
+  const areaFilter = params.get("area")
 
   const [lens, setLens] = React.useState<LensId>("mine")
   const [query, setQuery] = React.useState("")
@@ -87,11 +88,16 @@ export function TasksContent() {
     return state.tasks
       .filter((t) => matchesLens(t, lens))
       .filter((t) => {
+        if (!areaFilter) return true
+        if (areaFilter === "__none") return taskAreaIds(t).length === 0
+        return taskAreaIds(t).includes(areaFilter)
+      })
+      .filter((t) => {
         if (!q) return true
         const haystack = [
           t.title,
           t.description ?? "",
-          areaName(state, t.areaId),
+          ...taskAreaNames(state, t),
           personName(state, t.assigneeId),
         ]
           .join(" ")
@@ -105,10 +111,18 @@ export function TasksContent() {
     if (!groupByArea) return null
     const map = new Map<string, Task[]>()
     for (const t of visible) {
-      const key = t.areaId ?? "__none"
-      const list = map.get(key)
-      if (list) list.push(t)
-      else map.set(key, [t])
+      const areaIds = taskAreaIds(t)
+      if (areaIds.length === 0) {
+        const noArea = map.get("__none")
+        if (noArea) noArea.push(t)
+        else map.set("__none", [t])
+        continue
+      }
+      areaIds.forEach((key) => {
+        const list = map.get(key)
+        if (list) list.push(t)
+        else map.set(key, [t])
+      })
     }
     return [...map.entries()].sort((a, b) => b[1].length - a[1].length)
   }, [visible, groupByArea])

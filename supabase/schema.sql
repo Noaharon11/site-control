@@ -195,6 +195,28 @@ create table if not exists task_events (
     on delete cascade
 );
 
+create table if not exists task_areas (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references projects(id) on delete cascade,
+  task_external_id text not null,
+  area_external_id text not null,
+  created_at timestamptz not null default now(),
+  unique (project_id, task_external_id, area_external_id),
+  foreign key (project_id, task_external_id)
+    references tasks (project_id, external_id)
+    on delete cascade,
+  foreign key (project_id, area_external_id)
+    references areas (project_id, external_id)
+    on delete cascade
+);
+
+-- Backfill existing single-area task linkage into task_areas (idempotent).
+insert into task_areas (project_id, task_external_id, area_external_id)
+select t.project_id, t.external_id, t.area_external_id
+from tasks t
+where t.area_external_id is not null
+on conflict (project_id, task_external_id, area_external_id) do nothing;
+
 create table if not exists blockers (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references projects(id) on delete cascade,
@@ -358,6 +380,147 @@ begin
   end loop;
 end $$;
 
+-- Initial real project structure (idempotent, non-destructive).
+-- This seeds the physical areas and the initial morning-tour route for proj-1.
+do $$
+declare
+  v_project_id uuid;
+begin
+  insert into projects (
+    external_id,
+    name,
+    description,
+    apartments,
+    basements,
+    floors,
+    started_at,
+    status
+  )
+  values (
+    'proj-1',
+    'פרויקט הרקפות',
+    'פרויקט בנייה למגורים',
+    45,
+    3,
+    7,
+    current_date,
+    'active'
+  )
+  on conflict (external_id) do nothing;
+
+  select id into v_project_id
+  from projects
+  where external_id = 'proj-1'
+  limit 1;
+
+  if v_project_id is null then
+    raise exception 'Project with external_id=proj-1 was not found and could not be created';
+  end if;
+
+  with desired_areas as (
+    select *
+    from (
+      values
+        ('basement-3', 'מרתף 3', 'basement', -3, null::text, 1, true),
+        ('basement-2', 'מרתף 2', 'basement', -2, null::text, 2, true),
+        ('basement-1', 'מרתף 1', 'basement', -1, null::text, 3, true),
+        ('ground-east', 'קומת קרקע - מזרח', 'ground', 0, 'east', 4, true),
+        ('floor-1-east', 'קומה 1 - מזרח', 'floor', 1, 'east', 5, true),
+        ('floor-2-east', 'קומה 2 - מזרח', 'floor', 2, 'east', 6, true),
+        ('floor-3-east', 'קומה 3 - מזרח', 'floor', 3, 'east', 7, true),
+        ('floor-4-east', 'קומה 4 - מזרח', 'floor', 4, 'east', 8, true),
+        ('floor-5-east', 'קומה 5 - מזרח', 'floor', 5, 'east', 9, true),
+        ('floor-6-east', 'קומה 6 - מזרח', 'floor', 6, 'east', 10, true),
+        ('floor-7-east', 'קומה 7 - מזרח', 'floor', 7, 'east', 11, true),
+        ('roof', 'גג', 'roof', 8, null::text, 12, true),
+        ('floor-7-west', 'קומה 7 - מערב', 'floor', 7, 'west', 13, true),
+        ('floor-6-west', 'קומה 6 - מערב', 'floor', 6, 'west', 14, true),
+        ('floor-5-west', 'קומה 5 - מערב', 'floor', 5, 'west', 15, true),
+        ('floor-4-west', 'קומה 4 - מערב', 'floor', 4, 'west', 16, true),
+        ('floor-3-west', 'קומה 3 - מערב', 'floor', 3, 'west', 17, true),
+        ('floor-2-west', 'קומה 2 - מערב', 'floor', 2, 'west', 18, true),
+        ('floor-1-west', 'קומה 1 - מערב', 'floor', 1, 'west', 19, true),
+        ('ground-west', 'קומת קרקע - מערב', 'ground', 0, 'west', 20, true),
+        ('facade-east', 'חזית מזרחית', 'facade', 9, null::text, 21, true),
+        ('facade-west', 'חזית מערבית', 'facade', 9, null::text, 22, true),
+        ('external-development', 'פיתוח חוץ', 'external', 9, null::text, 23, true)
+    ) as x(external_id, name, zone, level, wing, route_order, active)
+  )
+  insert into areas (
+    project_id,
+    external_id,
+    name,
+    zone,
+    level,
+    wing,
+    route_order,
+    active
+  )
+  select
+    v_project_id,
+    d.external_id,
+    d.name,
+    d.zone,
+    d.level,
+    d.wing,
+    d.route_order,
+    d.active
+  from desired_areas d
+  where not exists (
+    select 1
+    from areas a
+    where a.project_id = v_project_id
+      and (a.external_id = d.external_id or a.name = d.name)
+  );
+
+  if not exists (
+    select 1 from tour_routes tr where tr.project_id = v_project_id
+  ) then
+    with desired_route as (
+      select *
+      from (
+        values
+          ('basement-3', 1),
+          ('basement-2', 2),
+          ('basement-1', 3),
+          ('ground-east', 4),
+          ('floor-1-east', 5),
+          ('floor-2-east', 6),
+          ('floor-3-east', 7),
+          ('floor-4-east', 8),
+          ('floor-5-east', 9),
+          ('floor-6-east', 10),
+          ('floor-7-east', 11),
+          ('roof', 12),
+          ('floor-7-west', 13),
+          ('floor-6-west', 14),
+          ('floor-5-west', 15),
+          ('floor-4-west', 16),
+          ('floor-3-west', 17),
+          ('floor-2-west', 18),
+          ('floor-1-west', 19),
+          ('ground-west', 20),
+          ('facade-east', 21),
+          ('facade-west', 22),
+          ('external-development', 23)
+      ) as r(area_external_id, route_order)
+    )
+    insert into tour_routes (project_id, area_external_id, route_order)
+    select
+      v_project_id,
+      r.area_external_id,
+      r.route_order
+    from desired_route r
+    where exists (
+      select 1
+      from areas a
+      where a.project_id = v_project_id
+        and a.external_id = r.area_external_id
+        and a.active = true
+    );
+  end if;
+end $$;
+
 -- RLS policies for the current single-project stage.
 -- NOTE: Without auth yet, anon access is restricted to the single project external_id 'proj-1'.
 -- Replace with auth-linked membership policies in the next stage.
@@ -371,6 +534,7 @@ alter table tour_area_visits enable row level security;
 alter table observations enable row level security;
 alter table tasks enable row level security;
 alter table task_events enable row level security;
+alter table task_areas enable row level security;
 alter table blockers enable row level security;
 alter table defects enable row level security;
 alter table decisions enable row level security;
@@ -428,6 +592,9 @@ create policy tasks_single_project on tasks
 for all to anon using (project_is_single_target(project_id)) with check (project_is_single_target(project_id));
 drop policy if exists task_events_single_project on task_events;
 create policy task_events_single_project on task_events
+for all to anon using (project_is_single_target(project_id)) with check (project_is_single_target(project_id));
+drop policy if exists task_areas_single_project on task_areas;
+create policy task_areas_single_project on task_areas
 for all to anon using (project_is_single_target(project_id)) with check (project_is_single_target(project_id));
 drop policy if exists blockers_single_project on blockers;
 create policy blockers_single_project on blockers

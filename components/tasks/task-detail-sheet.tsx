@@ -17,7 +17,7 @@ import {
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { useStore } from "@/lib/store"
-import { areaName, personById, personName } from "@/lib/selectors"
+import { personById, personName, taskAreaIds, taskAreaSummary } from "@/lib/selectors"
 import { dayOffset, daysOpen, isOverdue, relativeDay, shortDate } from "@/lib/dates"
 import { PRIORITY_LABEL, STATUS_LABEL, type TaskStatus } from "@/lib/types"
 import { ResponsiveSheet } from "@/components/common/responsive-sheet"
@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Separator } from "@/components/ui/separator"
 import { AgeChip, PriorityChip, StatusChip } from "@/components/common/chips"
+import { AreaMultiSelect } from "@/components/tasks/area-multi-select"
 
 const QUICK_STATUS: { value: TaskStatus; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { value: "done", label: "הושלם", icon: Check },
@@ -41,11 +42,13 @@ export function TaskDetailSheet({
 }) {
   const { state, dispatch } = useStore()
   const [note, setNote] = React.useState("")
+  const [areaIds, setAreaIds] = React.useState<string[]>([])
   const task = state.tasks.find((t) => t.id === taskId)
 
   React.useEffect(() => {
     setNote("")
-  }, [taskId])
+    setAreaIds(task ? taskAreaIds(task) : [])
+  }, [taskId, task])
 
   if (!task) {
     return <ResponsiveSheet open={false} onOpenChange={onOpenChange} title="">{null}</ResponsiveSheet>
@@ -69,6 +72,18 @@ export function TaskDetailSheet({
     toast.success("הערה נוספה ליומן המשימה")
   }
 
+  function saveAreas() {
+    if (!task) return
+    const next = [...new Set(areaIds.filter(Boolean))]
+    dispatch({
+      type: "updateTask",
+      id: task.id,
+      patch: { areaIds: next },
+      note: "עודכן שיוך אזורים למשימה",
+    })
+    toast.success("שיוך האזורים עודכן")
+  }
+
   return (
     <ResponsiveSheet
       open={Boolean(taskId)}
@@ -78,7 +93,7 @@ export function TaskDetailSheet({
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <Route className="inline size-3" />
           מקור: {task.source}
-          {task.areaId && ` • ${areaName(state, task.areaId)}`}
+          {` • ${taskAreaSummary(state, task)}`}
           {` • נוצר ${shortDate(task.createdAt)}`}
         </span>
       }
@@ -170,9 +185,9 @@ export function TaskDetailSheet({
           <div className="flex flex-col gap-0.5">
             <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <MapPin className="size-3.5" />
-              אזור
+              אזורים
             </dt>
-            <dd className="font-semibold">{areaName(state, task.areaId)}</dd>
+            <dd className="font-semibold">{taskAreaSummary(state, task)}</dd>
           </div>
           <div className="flex flex-col gap-0.5">
             <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -245,6 +260,21 @@ export function TaskDetailSheet({
             </div>
           </div>
         )}
+
+        <Separator />
+
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-bold text-muted-foreground">אזורים</p>
+          <AreaMultiSelect
+            areas={state.areas.filter((a) => a.active !== false)}
+            value={areaIds}
+            onChange={setAreaIds}
+            placeholder="בחר אזור אחד או יותר"
+          />
+          <Button variant="outline" size="sm" onClick={saveAreas}>
+            שמור אזורים
+          </Button>
+        </div>
 
         <Separator />
 

@@ -4,7 +4,7 @@ import * as React from "react"
 import { CalendarClock, MapPin, MoreVertical, User } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useStore } from "@/lib/store"
-import { areaName, personName } from "@/lib/selectors"
+import { personName, taskAreaSummary } from "@/lib/selectors"
 import { daysOpen, isOverdue, relativeDay } from "@/lib/dates"
 import type { Task } from "@/lib/types"
 import { AgeChip, PendingChip, PriorityBar, PriorityChip, StatusChip } from "@/components/common/chips"
@@ -67,10 +67,10 @@ export function TaskCard({
               <User className="size-3 shrink-0" />
               {personName(state, task.assigneeId)}
             </span>
-            {!hideArea && task.areaId && (
+            {!hideArea && (
               <span className="inline-flex items-center gap-1">
                 <MapPin className="size-3 shrink-0" />
-                {areaName(state, task.areaId)}
+                {taskAreaSummary(state, task)}
               </span>
             )}
             <span

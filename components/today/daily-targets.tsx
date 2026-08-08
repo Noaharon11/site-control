@@ -5,7 +5,7 @@ import { Check, Target, ChevronLeft } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { useStore } from "@/lib/store"
-import { areaName, personName } from "@/lib/selectors"
+import { personName, taskAreaSummary } from "@/lib/selectors"
 import { relativeDay } from "@/lib/dates"
 
 export function DailyTargets({ onOpenTask }: { onOpenTask: (id: string) => void }) {
@@ -84,7 +84,7 @@ export function DailyTargets({ onOpenTask }: { onOpenTask: (id: string) => void 
                   {task && (
                     <span className="nums mt-0.5 block truncate text-[11px] text-primary-foreground/60">
                       {personName(state, task.assigneeId)}
-                      {task.areaId ? ` • ${areaName(state, task.areaId)}` : ""}
+                      {` • ${taskAreaSummary(state, task)}`}
                       {task.dueDate ? ` • יעד ${relativeDay(task.dueDate)}` : ""}
                     </span>
                   )}

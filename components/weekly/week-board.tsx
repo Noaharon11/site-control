@@ -4,7 +4,7 @@ import * as React from "react"
 import { CalendarPlus, GripVertical, Inbox } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useStore } from "@/lib/store"
-import { areaName, personName, isOpen } from "@/lib/selectors"
+import { personName, isOpen, taskAreaSummary } from "@/lib/selectors"
 import { dayName, isOverdue, shortDate, today, workWeek } from "@/lib/dates"
 import type { ISODate, Task } from "@/lib/types"
 import { PriorityBar } from "@/components/common/chips"
@@ -255,7 +255,7 @@ function BoardCard({
           </p>
           <p className="mt-1 truncate text-[11px] text-muted-foreground">
             {personName(state, task.assigneeId)}
-            {task.areaId ? ` • ${areaName(state, task.areaId)}` : ""}
+            {` • ${taskAreaSummary(state, task)}`}
           </p>
         </button>
 

@@ -64,6 +64,9 @@ export interface Task {
   id: string
   title: string
   description?: string
+  /** canonical many-to-many relationship represented in app state */
+  areaIds: string[]
+  /** legacy primary area kept for backward compatibility */
   areaId: string | null
   assigneeId: string
   assigneeGroup: PersonGroup

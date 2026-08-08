@@ -27,6 +27,7 @@ import {
 import { areaName, openBlockers, openTasksInArea, personName } from "@/lib/selectors"
 import { dayOffset, daysOpen, nowTime, today } from "@/lib/dates"
 import { AgeChip, PriorityChip, SelectChip, StatusChip } from "@/components/common/chips"
+import { AreaMultiSelect } from "@/components/tasks/area-multi-select"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
@@ -583,6 +584,7 @@ function BlockerForm({ areaId, onDone }: { areaId: string; onDone: () => void })
         task: {
           id: taskId,
           title: `לטפל בחסם: ${text.trim()}`,
+          areaIds: [areaId],
           areaId,
           assigneeId: "me",
           assigneeGroup: "me",
@@ -657,6 +659,7 @@ function TaskForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
   const { state, dispatch, uid } = useStore()
   const tour = state.tours.find((t) => t.date === today())
   const [title, setTitle] = React.useState("")
+  const [areaIds, setAreaIds] = React.useState<string[]>([areaId])
   const [assigneeId, setAssigneeId] = React.useState("me")
   const [priority, setPriority] = React.useState<"critical" | "high" | "normal">("normal")
   const [due, setDue] = React.useState<"today" | "tomorrow" | "week">("tomorrow")
@@ -666,12 +669,14 @@ function TaskForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
   function save() {
     if (!title.trim()) return
     const person = assignees.find((p) => p.id === assigneeId)
+    const normalizedAreaIds = [...new Set(areaIds.filter(Boolean))]
     dispatch({
       type: "addTask",
       task: {
         id: uid("tk"),
         title: title.trim(),
-        areaId,
+        areaIds: normalizedAreaIds,
+        areaId: normalizedAreaIds[0] ?? null,
         assigneeId,
         assigneeGroup: person?.group ?? "me",
         priority,
@@ -694,6 +699,17 @@ function TaskForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
         placeholder="מה צריך לעשות?"
         className="h-11 text-[15px]"
       />
+      <div>
+        <p className="pb-2 text-[12px] font-bold uppercase tracking-wide text-muted-foreground">
+          אזורים
+        </p>
+        <AreaMultiSelect
+          areas={state.areas.filter((a) => a.active !== false)}
+          value={areaIds}
+          onChange={setAreaIds}
+          placeholder="בחר אזור אחד או יותר"
+        />
+      </div>
       <div>
         <p className="pb-2 text-[12px] font-bold uppercase tracking-wide text-muted-foreground">
           על מי
@@ -931,6 +947,7 @@ function DealForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
         task: {
           id: taskId,
           title: commitment.trim(),
+          areaIds: [areaId],
           areaId,
           assigneeId: contractorId,
           assigneeGroup: "contractor",
