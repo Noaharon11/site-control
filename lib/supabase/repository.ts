@@ -34,7 +34,8 @@ interface ProjectRow {
   status: ProjectState["project"]["status"]
 }
 
-const DEFAULT_PROJECT_EXTERNAL_ID = "proj-1"
+const DEFAULT_PROJECT_EXTERNAL_ID =
+  process.env.NEXT_PUBLIC_SUPABASE_PROJECT_EXTERNAL_ID?.trim() || "proj-1"
 
 function toError(error: PostgrestError | null, context: string) {
   return new Error(error ? `${context}: ${error.message}` : context)
@@ -127,6 +128,30 @@ function flattenTaskAreas(projectId: string, tasks: Task[]) {
   )
 }
 
+async function loadProjectReference() {
+  const supabase = getSupabaseClient()
+  if (!supabase) return null
+
+  const preferred = await supabase
+    .from("projects")
+    .select("id, external_id")
+    .eq("external_id", DEFAULT_PROJECT_EXTERNAL_ID)
+    .maybeSingle()
+
+  if (preferred.error) throw toError(preferred.error, "Failed to load preferred project")
+  if (preferred.data) return preferred.data as { id: string; external_id: string }
+
+  const fallback = await supabase
+    .from("projects")
+    .select("id, external_id")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (fallback.error) throw toError(fallback.error, "Failed to load fallback project")
+  return (fallback.data as { id: string; external_id: string } | null) ?? null
+}
+
 async function ensureProject(project: ProjectState["project"]) {
   const supabase = getSupabaseClient()
   if (!supabase) return null
@@ -208,6 +233,32 @@ async function replaceTaskAreas(projectId: string, tasks: Task[]) {
 
   const ins = await supabase.from("task_areas").insert(rows)
   if (ins.error) throw toError(ins.error, "Failed to save task areas")
+}
+
+async function reconcileDeletedTasks(projectId: string, tasks: Task[]) {
+  const supabase = getSupabaseClient()
+  if (!supabase) return
+
+  const existing = await supabase.from("tasks").select("external_id").eq("project_id", projectId)
+  if (existing.error) throw toError(existing.error, "Failed to load existing tasks")
+
+  const keep = new Set(tasks.map((task) => task.id))
+  const stale = ((existing.data ?? []) as Array<{ external_id: string }>).filter(
+    (row) => !keep.has(row.external_id),
+  )
+
+  if (stale.length === 0) return
+
+  const del = await supabase
+    .from("tasks")
+    .delete()
+    .eq("project_id", projectId)
+    .in(
+      "external_id",
+      stale.map((row) => row.external_id),
+    )
+
+  if (del.error) throw toError(del.error, "Failed to delete removed tasks")
 }
 
 async function upsertRows(table: string, rows: Record<string, unknown>[], onConflict: string) {
@@ -403,6 +454,7 @@ export async function saveProjectStateToSupabase(state: ProjectState) {
     "project_id,external_id",
   )
 
+  await reconcileDeletedTasks(projectId, state.tasks)
   await replaceTaskEvents(projectId, state.tasks)
   await replaceTaskAreas(projectId, state.tasks)
 
@@ -533,11 +585,10 @@ export async function loadProjectStateFromSupabase(): Promise<ProjectState | nul
   const supabase = getSupabaseClient()
   if (!supabase) return null
 
-  const projectRes = await supabase
-    .from("projects")
-    .select("*")
-    .eq("external_id", DEFAULT_PROJECT_EXTERNAL_ID)
-    .maybeSingle()
+  const projectRef = await loadProjectReference()
+  if (!projectRef) return null
+
+  const projectRes = await supabase.from("projects").select("*").eq("id", projectRef.id).maybeSingle()
 
   if (projectRes.error) throw toError(projectRes.error, "Failed to load project")
   if (!projectRes.data) return null

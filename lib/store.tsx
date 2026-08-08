@@ -84,6 +84,7 @@ type Action =
   /* ---- tasks ---- */
   | { type: "addTask"; task: Task }
   | { type: "updateTask"; id: string; patch: Partial<Task>; note?: string }
+  | { type: "deleteTask"; id: string }
   /* ---- field records ---- */
   | { type: "addObservation"; observation: Observation }
   | { type: "addBlocker"; blocker: Blocker }
@@ -400,6 +401,48 @@ function reducer(state: ProjectState, action: Action): ProjectState {
           next.areaId,
           prev.id,
         ),
+      }
+    }
+
+    case "deleteTask": {
+      const task = state.tasks.find((t) => t.id === action.id)
+      if (!task) return state
+
+      const tasks = state.tasks.filter((t) => t.id !== action.id)
+      const tours = state.tours.map((tour) => ({
+        ...tour,
+        visits: Object.fromEntries(
+          Object.entries(tour.visits).map(([areaId, visit]) => [
+            areaId,
+            { ...visit, taskIds: (visit.taskIds ?? []).filter((id) => id !== action.id) },
+          ]),
+        ),
+      }))
+      const blockers = state.blockers.map((blocker) =>
+        blocker.taskId === action.id ? { ...blocker, taskId: null, ...pending(state) } : blocker,
+      )
+      const decisions = state.decisions.map((decision) =>
+        decision.taskIds.includes(action.id)
+          ? { ...decision, taskIds: decision.taskIds.filter((id) => id !== action.id), ...pending(state) }
+          : decision,
+      )
+      const photos = state.photos.map((photo) =>
+        photo.taskId === action.id ? { ...photo, taskId: null, ...pending(state) } : photo,
+      )
+      const dayTargets = state.dayTargets.map((target) =>
+        target.taskId === action.id ? { ...target, taskId: null } : target,
+      )
+
+      return {
+        ...state,
+        tasks,
+        tours,
+        blockers,
+        decisions,
+        photos,
+        dayTargets,
+        pendingCount: bump(state),
+        activity: log(state, "task_status", `נמחקה משימה: ${task.title}`, task.areaId, task.id),
       }
     }
 

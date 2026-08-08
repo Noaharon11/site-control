@@ -26,6 +26,7 @@ export function TaskCard({
   const { state } = useStore()
   const overdue = isOverdue(task.dueDate) && task.status !== "done"
   const age = daysOpen(task.createdAt)
+  const hasValidTaskId = typeof task.id === "string" && task.id.trim().length > 0
 
   return (
     <article
@@ -40,9 +41,9 @@ export function TaskCard({
       <div className={cn("flex items-start gap-2 ps-3.5", compact ? "p-2.5 ps-3.5" : "p-3 ps-4")}>
         <button
           type="button"
-          onClick={onOpen ? () => onOpen(task.id) : undefined}
+          onClick={onOpen && hasValidTaskId ? () => onOpen(task.id) : undefined}
           className="min-w-0 flex-1 text-start"
-          disabled={!onOpen}
+          disabled={!onOpen || !hasValidTaskId}
         >
           <div className="flex flex-wrap items-center gap-1.5">
             <StatusChip status={task.status} />
@@ -91,6 +92,8 @@ export function TaskCard({
           trigger={
             <button
               type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
               className="-me-1 -mt-1 flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
               aria-label={`פעולות עבור ${task.title}`}
             >

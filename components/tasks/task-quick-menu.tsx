@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { CalendarPlus, Check, Loader2, Hand, Clock, UserCog, CircleDot } from "lucide-react"
+import { CalendarPlus, Check, Loader2, Hand, Clock, UserCog, CircleDot, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { useStore } from "@/lib/store"
 import { dayOffset, today } from "@/lib/dates"
@@ -29,8 +29,10 @@ const STATUS_OPTIONS: { value: TaskStatus; icon: React.ComponentType<{ className
 
 export function TaskQuickMenu({ task, trigger }: { task: Task; trigger: React.ReactElement }) {
   const { state, dispatch } = useStore()
+  const hasValidTaskId = typeof task.id === "string" && task.id.trim().length > 0
 
   function setStatus(status: TaskStatus) {
+    if (!hasValidTaskId) return
     dispatch({ type: "updateTask", id: task.id, patch: { status } })
     toast.success(
       status === "done" ? `הושלם: ${task.title}` : `הסטטוס עודכן ל"${STATUS_LABEL[status]}"`,
@@ -39,6 +41,7 @@ export function TaskQuickMenu({ task, trigger }: { task: Task; trigger: React.Re
   }
 
   function snooze(days: number, label: string) {
+    if (!hasValidTaskId) return
     dispatch({
       type: "updateTask",
       id: task.id,
@@ -49,6 +52,7 @@ export function TaskQuickMenu({ task, trigger }: { task: Task; trigger: React.Re
   }
 
   function reassign(id: string, group: Task["assigneeGroup"], name: string) {
+    if (!hasValidTaskId) return
     dispatch({
       type: "updateTask",
       id: task.id,
@@ -58,11 +62,23 @@ export function TaskQuickMenu({ task, trigger }: { task: Task; trigger: React.Re
     toast(`הוקצה ל${name}`)
   }
 
+  function deleteTask() {
+    if (!hasValidTaskId) return
+    if (typeof window !== "undefined") {
+      const confirmed = window.confirm(`למחוק את המשימה "${task.title}"?`)
+      if (!confirmed) return
+    }
+    dispatch({ type: "deleteTask", id: task.id })
+    toast.success(`המשימה נמחקה: ${task.title}`)
+  }
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger render={trigger} />
       <DropdownMenuContent align="start" className="w-56">
-        <DropdownMenuLabel className="truncate">{task.title}</DropdownMenuLabel>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="truncate">{task.title}</DropdownMenuLabel>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
 
         <DropdownMenuGroup>
@@ -146,6 +162,7 @@ export function TaskQuickMenu({ task, trigger }: { task: Task; trigger: React.Re
         <DropdownMenuGroup>
           <DropdownMenuItem
             onClick={() => {
+              if (!hasValidTaskId) return
               dispatch({
                 type: "updateTask",
                 id: task.id,
@@ -164,6 +181,10 @@ export function TaskQuickMenu({ task, trigger }: { task: Task; trigger: React.Re
               העבר להיום
             </DropdownMenuItem>
           )}
+          <DropdownMenuItem variant="destructive" onClick={deleteTask}>
+            <Trash2 />
+            מחק משימה
+          </DropdownMenuItem>
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
