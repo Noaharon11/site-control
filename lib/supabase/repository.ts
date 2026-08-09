@@ -295,9 +295,21 @@ export async function createTaskInSupabase(
   if (!projectRef) return
 
   debugLog("task:create:start", { projectId: projectRef.id, externalId: task.id, title: task.title })
+  // Critical: throws if the task row cannot be saved.
   await upsertTaskRow(projectRef.id, task)
-  await replaceTaskEventsForTask(projectRef.id, task)
-  await replaceTaskAreasForTask(projectRef.id, task)
+  // Non-critical: history and area links are supplementary.
+  // A failure here (e.g. RLS not yet applied) must not report a false
+  // "task not saved" — the task IS in Supabase via the row above.
+  try {
+    await replaceTaskEventsForTask(projectRef.id, task)
+  } catch (err) {
+    debugLog("task:create:events:warning", err)
+  }
+  try {
+    await replaceTaskAreasForTask(projectRef.id, task)
+  } catch (err) {
+    debugLog("task:create:areas:warning", err)
+  }
   await saveActivityLogEntry(projectRef.id, activity)
   debugLog("task:create:complete", { projectId: projectRef.id, externalId: task.id })
 }
@@ -311,9 +323,18 @@ export async function updateTaskInSupabase(
   if (!projectRef) return
 
   debugLog("task:update:start", { projectId: projectRef.id, externalId: task.id, status: task.status })
+  // Critical: throws if the task row cannot be updated.
   await upsertTaskRow(projectRef.id, task)
-  await replaceTaskEventsForTask(projectRef.id, task)
-  await replaceTaskAreasForTask(projectRef.id, task)
+  try {
+    await replaceTaskEventsForTask(projectRef.id, task)
+  } catch (err) {
+    debugLog("task:update:events:warning", err)
+  }
+  try {
+    await replaceTaskAreasForTask(projectRef.id, task)
+  } catch (err) {
+    debugLog("task:update:areas:warning", err)
+  }
   await saveActivityLogEntry(projectRef.id, activity)
   debugLog("task:update:complete", { projectId: projectRef.id, externalId: task.id })
 }
