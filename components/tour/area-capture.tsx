@@ -15,8 +15,8 @@ import {
   Users,
   Wrench,
 } from "lucide-react"
-import { cn } from "@/lib/utils"
 import { useStore } from "@/lib/store"
+import { cn } from "@/lib/utils"
 import {
   BLOCKER_LABEL,
   PROGRESS_TAGS,
@@ -28,21 +28,11 @@ import { areaName, openBlockers, openTasksInArea, personName } from "@/lib/selec
 import { dayOffset, daysOpen, nowTime, today } from "@/lib/dates"
 import { AgeChip, PriorityChip, SelectChip, StatusChip } from "@/components/common/chips"
 import { AreaMultiSelect } from "@/components/tasks/area-multi-select"
+import { PhotoUpload } from "@/components/common/photo-upload"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
-
-const SITE_PHOTOS = [
-  { url: "/site/tiling.png", caption: "ריצוף בעבודה" },
-  { url: "/site/electrical.png", caption: "חשמל בקירות" },
-  { url: "/site/drywall.png", caption: "גבס במסדרון" },
-  { url: "/site/paint.png", caption: "צבע הושלם" },
-  { url: "/site/doorframes.png", caption: "משקוף חסר" },
-  { url: "/site/pumproom.png", caption: "רטיבות בחדר משאבות" },
-  { url: "/site/facade.png", caption: "חזית מערבית" },
-  { url: "/site/earthworks.png", caption: "פיתוח חוץ" },
-]
 
 const BLOCKER_REASONS: BlockerReason[] = [
   "material",
@@ -865,74 +855,18 @@ function DefectForm({ areaId, onDone }: { areaId: string; onDone: () => void }) 
 }
 
 function PhotoForm({ areaId, onDone }: { areaId: string; onDone: () => void }) {
-  const { state, dispatch, uid } = useStore()
+  const { state } = useStore()
   const tour = state.tours.find((t) => t.date === today())
-  const [picked, setPicked] = React.useState<number | null>(null)
-  const [caption, setCaption] = React.useState("")
-
-  function save() {
-    if (picked === null) return
-    const p = SITE_PHOTOS[picked]
-    dispatch({
-      type: "addPhoto",
-      photo: {
-        id: uid("ph"),
-        areaId,
-        date: today(),
-        time: nowTime(),
-        caption: caption.trim() || p.caption,
-        url: p.url,
-        tourId: tour?.id ?? null,
-      },
-    })
-    onDone()
-  }
 
   return (
     <PanelShell>
-      <p className="text-[13px] font-bold text-foreground">בחר תמונה מהמצלמה</p>
-      <div className="grid grid-cols-4 gap-2">
-        {SITE_PHOTOS.map((p, i) => (
-          <button
-            key={p.url}
-            type="button"
-            onClick={() => {
-              setPicked(i)
-              setCaption(p.caption)
-            }}
-            aria-pressed={picked === i}
-            className={cn(
-              "relative aspect-square overflow-hidden rounded-lg border-2",
-              picked === i ? "border-primary" : "border-border",
-            )}
-          >
-            <img
-              src={p.url || "/placeholder.svg"}
-              alt={p.caption}
-              className="size-full object-cover"
-            />
-            {picked === i && (
-              <span className="absolute inset-0 flex items-center justify-center bg-primary/40">
-                <Check className="size-5 text-primary-foreground" />
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-      <Input
-        value={caption}
-        onChange={(e) => setCaption(e.target.value)}
-        placeholder="כתובית לתמונה"
-        className="h-11 text-[15px]"
+      <p className="text-[13px] font-bold text-foreground">צרף תמונה לאזור</p>
+      <PhotoUpload
+        areaId={areaId}
+        tourId={tour?.id ?? null}
+        onSuccess={onDone}
+        onCancel={onDone}
       />
-      <div className="flex gap-2">
-        <Button className="h-11 flex-1" onClick={save} disabled={picked === null}>
-          צרף תמונה
-        </Button>
-        <Button variant="ghost" className="h-11" onClick={onDone}>
-          ביטול
-        </Button>
-      </div>
     </PanelShell>
   )
 }

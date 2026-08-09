@@ -2,15 +2,18 @@
 
 import * as React from "react"
 import Image from "next/image"
+import { Trash2 } from "lucide-react"
 
 import { ResponsiveSheet } from "@/components/common/responsive-sheet"
 import { HealthChip, SectionTitle } from "@/components/common/chips"
 import { TaskCard } from "@/components/tasks/task-card"
 import { TaskDetailSheet } from "@/components/tasks/task-detail-sheet"
+import { PhotoDeleteDialog } from "@/components/common/photo-delete-dialog"
 import { Button } from "@/components/ui/button"
 import { useStore } from "@/lib/store"
 import { areaById, areaStats, personName } from "@/lib/selectors"
 import { BLOCKER_LABEL } from "@/lib/types"
+import type { Photo } from "@/lib/types"
 import { ageLabel, shortDate } from "@/lib/dates"
 
 export function AreaDetailSheet({
@@ -22,6 +25,7 @@ export function AreaDetailSheet({
 }) {
   const { state } = useStore()
   const [openTaskId, setOpenTaskId] = React.useState<string | null>(null)
+  const [deletePhoto, setDeletePhoto] = React.useState<Photo | null>(null)
 
   const area = areaById(state, areaId)
   const stats = React.useMemo(() => (areaId ? areaStats(state, areaId) : null), [state, areaId])
@@ -180,7 +184,7 @@ export function AreaDetailSheet({
                 <ul className="grid grid-cols-2 gap-2">
                   {stats.photos.map((p) => (
                     <li key={p.id} className="flex flex-col gap-1">
-                      <span className="relative block aspect-4/3 overflow-hidden rounded-lg border border-border bg-muted">
+                      <span className="group relative block aspect-4/3 overflow-hidden rounded-lg border border-border bg-muted">
                         <Image
                           src={p.url || "/placeholder.svg"}
                           alt={p.caption}
@@ -188,6 +192,14 @@ export function AreaDetailSheet({
                           sizes="(max-width: 640px) 45vw, 220px"
                           className="object-cover"
                         />
+                        <button
+                          type="button"
+                          aria-label="מחק תמונה"
+                          onClick={() => setDeletePhoto(p)}
+                          className="absolute end-1 top-1 hidden size-7 items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition-opacity hover:bg-black/70 group-hover:flex group-hover:opacity-100"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
                       </span>
                       <span className="text-[11px] leading-snug text-muted-foreground">
                         {shortDate(p.date)} • {p.caption}
@@ -202,6 +214,11 @@ export function AreaDetailSheet({
       </ResponsiveSheet>
 
       <TaskDetailSheet taskId={openTaskId} onOpenChange={() => setOpenTaskId(null)} />
+      <PhotoDeleteDialog
+        photo={deletePhoto}
+        open={!!deletePhoto}
+        onOpenChange={(v) => { if (!v) setDeletePhoto(null) }}
+      />
     </>
   )
 }

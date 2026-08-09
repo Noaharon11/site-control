@@ -7,11 +7,13 @@ import {
   Check,
   Footprints,
   Hand,
+  ImagePlus,
   Loader2,
   MapPin,
   MessageSquarePlus,
   Phone,
   Route,
+  Trash2,
   User,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -19,8 +21,10 @@ import { cn } from "@/lib/utils"
 import { useStore } from "@/lib/store"
 import { personById, personName, taskAreaIds, taskAreaSummary } from "@/lib/selectors"
 import { dayOffset, daysOpen, isOverdue, relativeDay, shortDate } from "@/lib/dates"
-import { PRIORITY_LABEL, STATUS_LABEL, type TaskStatus } from "@/lib/types"
+import { PRIORITY_LABEL, STATUS_LABEL, type Photo, type TaskStatus } from "@/lib/types"
 import { ResponsiveSheet } from "@/components/common/responsive-sheet"
+import { PhotoUpload } from "@/components/common/photo-upload"
+import { PhotoDeleteDialog } from "@/components/common/photo-delete-dialog"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Separator } from "@/components/ui/separator"
@@ -43,11 +47,14 @@ export function TaskDetailSheet({
   const { state, dispatch, commitAction } = useStore()
   const [note, setNote] = React.useState("")
   const [areaIds, setAreaIds] = React.useState<string[]>([])
+  const [showPhotoUpload, setShowPhotoUpload] = React.useState(false)
+  const [deletePhoto, setDeletePhoto] = React.useState<Photo | null>(null)
   const task = state.tasks.find((t) => t.id === taskId)
 
   React.useEffect(() => {
     setNote("")
     setAreaIds(task ? taskAreaIds(task) : [])
+    setShowPhotoUpload(false)
   }, [taskId, task])
 
   if (!task) {
@@ -88,6 +95,7 @@ export function TaskDetailSheet({
   }
 
   return (
+    <>
     <ResponsiveSheet
       open={Boolean(taskId)}
       onOpenChange={onOpenChange}
@@ -246,7 +254,7 @@ export function TaskDetailSheet({
             <p className="text-xs font-bold text-muted-foreground">תמונות מקושרות</p>
             <div className="flex gap-2 overflow-x-auto no-scrollbar">
               {photos.map((p) => (
-                <figure key={p.id} className="w-32 shrink-0">
+                <figure key={p.id} className="group relative w-32 shrink-0">
                   <div className="relative aspect-4/3 overflow-hidden rounded-md border border-border">
                     <Image
                       src={p.url || "/placeholder.svg"}
@@ -255,6 +263,14 @@ export function TaskDetailSheet({
                       sizes="128px"
                       className="object-cover"
                     />
+                    <button
+                      type="button"
+                      aria-label="מחק תמונה"
+                      onClick={() => setDeletePhoto(p)}
+                      className="absolute end-1 top-1 hidden size-6 items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition-opacity hover:bg-black/70 group-hover:flex group-hover:opacity-100"
+                    >
+                      <Trash2 className="size-3" />
+                    </button>
                   </div>
                   <figcaption className="nums mt-1 truncate text-[10px] text-muted-foreground">
                     {shortDate(p.date)} • {p.caption}
@@ -327,7 +343,46 @@ export function TaskDetailSheet({
             שמור הערה
           </Button>
         </div>
+
+        <Separator />
+
+        {/* photo upload */}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-bold text-muted-foreground">תמונות</p>
+            {!showPhotoUpload && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowPhotoUpload(true)}
+              >
+                <ImagePlus data-icon="inline-start" />
+                הוסף תמונה
+              </Button>
+            )}
+          </div>
+          {showPhotoUpload && task && taskAreaIds(task).length > 0 && (
+            <PhotoUpload
+              areaId={taskAreaIds(task)[0]!}
+              taskId={task.id}
+              onSuccess={() => setShowPhotoUpload(false)}
+              onCancel={() => setShowPhotoUpload(false)}
+            />
+          )}
+          {showPhotoUpload && task && taskAreaIds(task).length === 0 && (
+            <p className="rounded-lg bg-muted px-3 py-2 text-[13px] text-muted-foreground">
+              יש לשייך את המשימה לאזור לפני הוספת תמונה
+            </p>
+          )}
+        </div>
       </div>
     </ResponsiveSheet>
+
+    <PhotoDeleteDialog
+      photo={deletePhoto}
+      open={!!deletePhoto}
+      onOpenChange={(v) => { if (!v) setDeletePhoto(null) }}
+    />
+    </>
   )
 }

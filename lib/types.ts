@@ -162,7 +162,10 @@ export interface Photo
   date: ISODate
   time: string
   caption: string
+  /** in-memory display URL (signed URL for storage photos, object URL for offline-pending, or legacy path) */
   url: string
+  /** permanent canonical Supabase Storage path; null for legacy/demo photos */
+  storagePath?: string | null
   tourId?: string | null
   taskId?: string | null
   defectId?: string | null

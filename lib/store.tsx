@@ -13,7 +13,17 @@ import {
   loadProjectStateFromSupabase,
   saveProjectStateToSupabase,
   updateTaskInSupabase,
+  savePhotoRecord,
+  softDeletePhotoRecord,
 } from "./supabase/repository"
+import {
+  buildStoragePath,
+  deletePendingBlob,
+  deletePhotoFromStorage,
+  getSignedUrl,
+  loadPendingBlobs,
+  uploadPhotoToStorage,
+} from "./supabase/photo-repository"
 import type {
   ActivityKind,
   ActivityLog,
@@ -96,6 +106,8 @@ type Action =
   | { type: "addDefect"; defect: Defect }
   | { type: "addDecision"; decision: Decision }
   | { type: "addPhoto"; photo: Photo }
+  | { type: "updatePhoto"; id: string; patch: Partial<Photo> }
+  | { type: "deletePhoto"; id: string }
   /* ---- targets / log ---- */
   | { type: "setTargets"; targets: { text: string; taskId?: string | null }[] }
   | { type: "toggleTarget"; id: string }
@@ -555,6 +567,36 @@ function reducer(state: ProjectState, action: Action): ProjectState {
       }
     }
 
+    case "updatePhoto":
+      return {
+        ...state,
+        photos: state.photos.map((p) => (p.id === action.id ? { ...p, ...action.patch } : p)),
+      }
+
+    case "deletePhoto": {
+      const photo = state.photos.find((p) => p.id === action.id)
+      if (!photo) return state
+      const photos = state.photos.filter((p) => p.id !== action.id)
+      const tours = state.tours.map((tour) => ({
+        ...tour,
+        visits: Object.fromEntries(
+          Object.entries(tour.visits).map(([areaId, visit]) => [
+            areaId,
+            { ...visit, photoIds: (visit.photoIds ?? []).filter((id) => id !== action.id) },
+          ]),
+        ),
+      }))
+      const tasks = state.tasks.map((task) =>
+        task.photoIds?.includes(action.id)
+          ? { ...task, photoIds: (task.photoIds ?? []).filter((id) => id !== action.id) }
+          : task,
+      )
+      const defects = state.defects.map((defect) =>
+        defect.photoId === action.id ? { ...defect, photoId: null } : defect,
+      )
+      return { ...state, photos, tours, tasks, defects }
+    }
+
     case "setTargets":
       return {
         ...state,
@@ -962,8 +1004,45 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setSyncError(null)
 
     try {
-      await saveProjectStateToSupabase(stateRef.current)
-      await persistQueuedSideEffects(stateRef.current)
+      // Upload any offline-queued photo blobs before saving state
+      let syncState = stateRef.current
+      const pendingBlobs = await loadPendingBlobs()
+      if (pendingBlobs.length > 0) {
+        const projectExternalId = syncState.project.id
+        let stateChanged = false
+        for (const { photoId, file } of pendingBlobs) {
+          const photo = syncState.photos.find((p) => p.id === photoId)
+          if (!photo) {
+            await deletePendingBlob(photoId)
+            continue
+          }
+          try {
+            const storagePath = buildStoragePath(projectExternalId, photoId, file)
+            await uploadPhotoToStorage(file, storagePath)
+            const signedUrl = await getSignedUrl(storagePath)
+            syncState = {
+              ...syncState,
+              photos: syncState.photos.map((p) =>
+                p.id === photoId
+                  ? { ...p, storagePath, url: signedUrl || p.url, pending: false }
+                  : p,
+              ),
+            }
+            stateChanged = true
+            await deletePendingBlob(photoId)
+          } catch (blobErr) {
+            if (isDevelopment()) {
+              console.error("[syncNow] failed to upload offline photo blob", blobErr)
+            }
+          }
+        }
+        if (stateChanged) {
+          baseDispatch({ type: "hydrate", state: syncState })
+        }
+      }
+
+      await saveProjectStateToSupabase(syncState)
+      await persistQueuedSideEffects(syncState)
       const remote = await refreshAuthoritativeState()
       clearQueue()
       if (remote) {
@@ -1050,9 +1129,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     let mounted = true
 
     const bootstrap = async () => {
-      const cachedState = readCachedState()
+      let cachedState = readCachedState()
       const hasCachedData = hasMeaningfulLocalData(cachedState)
       const queuedOps = readQueue()
+
+      // Restore object URLs for photos that are pending upload (offline captures)
+      const offlinePendingPhotos = cachedState.photos.filter((p) => p.pending && !p.storagePath)
+      if (offlinePendingPhotos.length > 0) {
+        try {
+          const blobs = await loadPendingBlobs()
+          if (blobs.length > 0) {
+            const urlMap = new Map(
+              blobs.map(({ photoId, file }) => [photoId, URL.createObjectURL(file)]),
+            )
+            cachedState = {
+              ...cachedState,
+              photos: cachedState.photos.map((p) =>
+                p.pending && !p.storagePath && urlMap.has(p.id)
+                  ? { ...p, url: urlMap.get(p.id)! }
+                  : p,
+              ),
+            }
+          }
+        } catch {
+          // Non-fatal: offline photos simply show broken images until sync
+        }
+      }
 
       setLoadError(null)
       setUsingCachedFallback(false)

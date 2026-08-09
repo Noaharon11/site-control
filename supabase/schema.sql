@@ -633,3 +633,8 @@ create policy photos_bucket_update on storage.objects
 for update to anon
 using (bucket_id = 'site-photos')
 with check (bucket_id = 'site-photos');
+
+drop policy if exists photos_bucket_delete on storage.objects;
+create policy photos_bucket_delete on storage.objects
+for delete to anon
+using (bucket_id = 'site-photos');

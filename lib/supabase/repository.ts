@@ -18,6 +18,7 @@ import type {
   User,
 } from "@/lib/types"
 import { getSupabaseClient } from "./client"
+import { batchGetSignedUrls } from "./photo-repository"
 
 interface ProjectRow {
   id: string
@@ -142,7 +143,7 @@ function flattenTaskAreas(projectId: string, tasks: Task[]) {
   )
 }
 
-async function loadProjectReference() {
+export async function loadProjectReference() {
   const supabase = getSupabaseClient()
   if (!supabase) return null
 
@@ -394,6 +395,53 @@ export async function deleteTaskFromSupabase(project: ProjectState["project"], t
     .eq("external_id", taskExternalId)
 
   if (del.error) throw toError(del.error, "Failed to delete task")
+}
+
+/** Upsert a photo record in the DB. Must be called after the file is in Storage. */
+export async function savePhotoRecord(photo: Photo): Promise<void> {
+  const supabase = getSupabaseClient()
+  if (!supabase) return
+
+  const projectRef = await loadProjectReference()
+  if (!projectRef) throw new Error("Project not found")
+
+  const { error } = await supabase.from("photos").upsert(
+    {
+      project_id: projectRef.id,
+      external_id: photo.id,
+      area_external_id: photo.areaId,
+      date: photo.date,
+      time: photo.time,
+      caption: photo.caption,
+      url: photo.storagePath ?? photo.url,
+      storage_path: photo.storagePath ?? null,
+      tour_external_id: photo.tourId ?? null,
+      task_external_id: photo.taskId ?? null,
+      defect_external_id: photo.defectId ?? null,
+      pair_key: photo.pairKey ?? null,
+      stage: photo.stage ?? null,
+      pending: false,
+    },
+    { onConflict: "project_id,external_id" },
+  )
+  if (error) throw toError(error, "Failed to save photo record")
+}
+
+/** Soft-delete: sets archived_at so the photo is excluded from future loads. */
+export async function softDeletePhotoRecord(photoExternalId: string): Promise<void> {
+  const supabase = getSupabaseClient()
+  if (!supabase) return
+
+  const projectRef = await loadProjectReference()
+  if (!projectRef) return
+
+  const { error } = await supabase
+    .from("photos")
+    .update({ archived_at: new Date().toISOString() })
+    .eq("project_id", projectRef.id)
+    .eq("external_id", photoExternalId)
+
+  if (error) throw toError(error, "Failed to archive photo record")
 }
 
 async function upsertRows(table: string, rows: Record<string, unknown>[], onConflict: string) {
@@ -679,8 +727,8 @@ export async function saveProjectStateToSupabase(state: ProjectState) {
       date: photo.date,
       time: photo.time,
       caption: photo.caption,
-      url: photo.url,
-      storage_path: null,
+      url: photo.storagePath ?? photo.url,
+      storage_path: photo.storagePath ?? photo.storagePath ?? null,
       tour_external_id: photo.tourId ?? null,
       task_external_id: photo.taskId ?? null,
       defect_external_id: photo.defectId ?? null,
@@ -774,7 +822,7 @@ export async function loadProjectStateFromSupabase(): Promise<ProjectState | nul
     supabase.from("blockers").select("*").eq("project_id", projectId),
     supabase.from("defects").select("*").eq("project_id", projectId),
     supabase.from("decisions").select("*").eq("project_id", projectId),
-    supabase.from("photos").select("*").eq("project_id", projectId),
+    supabase.from("photos").select("*").eq("project_id", projectId).is("archived_at", null),
     supabase.from("activity_logs").select("*").eq("project_id", projectId),
     supabase.from("day_targets").select("*").eq("project_id", projectId),
   ])
@@ -969,22 +1017,34 @@ export async function loadProjectStateFromSupabase(): Promise<ProjectState | nul
         pending: Boolean(row.pending),
       }),
     ),
-    photos: ((photoRes.data ?? []) as Array<Record<string, unknown>>).map(
-      (row): Photo => ({
-        id: String(row.external_id),
-        areaId: String(row.area_external_id),
-        date: String(row.date),
-        time: String(row.time),
-        caption: String(row.caption),
-        url: String(row.url),
-        tourId: (row.tour_external_id as string | null) ?? null,
-        taskId: (row.task_external_id as string | null) ?? null,
-        defectId: (row.defect_external_id as string | null) ?? null,
-        pairKey: (row.pair_key as string | null) ?? undefined,
-        stage: (row.stage as Photo["stage"]) ?? undefined,
-        pending: Boolean(row.pending),
-      }),
-    ),
+    photos: await (async () => {
+      const rawPhotos = ((photoRes.data ?? []) as Array<Record<string, unknown>>).map(
+        (row): Photo => ({
+          id: String(row.external_id),
+          areaId: String(row.area_external_id),
+          date: String(row.date),
+          time: String(row.time),
+          caption: String(row.caption),
+          url: String(row.url),
+          storagePath: (row.storage_path as string | null) ?? null,
+          tourId: (row.tour_external_id as string | null) ?? null,
+          taskId: (row.task_external_id as string | null) ?? null,
+          defectId: (row.defect_external_id as string | null) ?? null,
+          pairKey: (row.pair_key as string | null) ?? undefined,
+          stage: (row.stage as Photo["stage"]) ?? undefined,
+          pending: Boolean(row.pending),
+        }),
+      )
+      // Resolve signed URLs for all storage-backed photos in one batch call
+      const paths = rawPhotos.filter((p) => p.storagePath).map((p) => p.storagePath!)
+      if (paths.length === 0) return rawPhotos
+      const signed = await batchGetSignedUrls(paths)
+      return rawPhotos.map((p) =>
+        p.storagePath && signed.has(p.storagePath)
+          ? { ...p, url: signed.get(p.storagePath)! }
+          : p,
+      )
+    })(),
     tours,
     activity: ((activityRes.data ?? []) as Array<Record<string, unknown>>).map(
       (row): ActivityLog => ({
